@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -6,12 +6,15 @@ import Animated, {
   useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Circle, ClipPath, Defs, G, Image, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, ClipPath, Defs, G, Image, Mask, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { SDO_DISC, SVS_DISC, subscribeLiveSky, type LiveSky } from '../sky/live';
 
 // Real photographs, public domain: the sun from NASA's Solar Dynamics
-// Observatory and the full moon from NASA's Scientific Visualization Studio.
-// See assets/sky/CREDITS.md.
-const SUN_TEXTURE = require('../../assets/sky/sun.jpg');
+// Observatory (two wavelengths) and the full moon from NASA's Scientific
+// Visualization Studio, as offline stand-ins for the live ones. See
+// assets/sky/CREDITS.md.
+const SUN_HOT = require('../../assets/sky/sun-hot.jpg');
+const SUN_GOLD = require('../../assets/sky/sun-gold.jpg');
 const MOON_TEXTURE = require('../../assets/sky/moon.jpg');
 import { moonAt } from '../arranger/inputs';
 import { breathAt } from '../breath';
@@ -96,34 +99,64 @@ function Dot({ index, clock, density, size, colour }: { index: number; clock: Sh
 }
 
 // ---- the bodies -------------------------------------------------------------
-// The photographed sun, tinted by its height: deep ember at the horizon,
-// washed toward white at noon, with a little extra limb darkening when low.
-function SunDisc({ size, sky }: { size: number; sky: Sky }) {
-  const r = size / 2;
-  const low = 1 - Math.pow(sky.sun, 0.6);
+// A whole NASA frame, scaled so its disc matches the orb, shown through a
+// soft radial mask: the limb keeps its real ragged edge (prominences, loops,
+// mountains) while the frame's corners and caption vanish.
+function Frame({ id, size, disc, caption, children }: { id: string; size: number; disc: number; caption?: boolean; children: React.ReactNode }) {
+  const box = size / disc;
+  const off = -(box - size) / 2;
   return (
-    <Svg width={size} height={size}>
+    <Svg width={box} height={box} style={{ position: 'absolute', left: off, top: off }}>
       <Defs>
-        <ClipPath id="sunClip">
-          <Circle cx={r} cy={r} r={r - 0.5} />
-        </ClipPath>
-        <RadialGradient id="limb" cx="50%" cy="50%" r="50%">
-          <Stop offset="0.55" stopColor="#3a0c00" stopOpacity="0" />
-          <Stop offset="1" stopColor="#3a0c00" stopOpacity={0.25 + 0.45 * low} />
+        <RadialGradient id={`${id}Fade`} cx="50%" cy="50%" r="50%">
+          <Stop offset="0.9" stopColor="#ffffff" stopOpacity="1" />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
+        <Mask id={`${id}Mask`}>
+          <Rect x="0" y="0" width={box} height={box} fill={`url(#${id}Fade)`} />
+          {caption && <Rect x="0" y={box * 0.945} width={box * 0.55} height={box * 0.06} fill="#000000" />}
+        </Mask>
       </Defs>
-      <Image href={SUN_TEXTURE} x={0} y={0} width={size} height={size} preserveAspectRatio="xMidYMid slice" clipPath="url(#sunClip)" />
-      <Circle cx={r} cy={r} r={r} fill={low > 0.5 ? '#ff2a00' : '#fff1bd'} fillOpacity={low > 0.5 ? 0.18 + 0.4 * (low - 0.5) : 0.3 * (1 - low * 2)} />
-      <Circle cx={r} cy={r} r={r} fill="url(#limb)" />
+      <G mask={`url(#${id}Mask)`}>{children}</G>
     </Svg>
   );
 }
 
-// The photographed moon with tonight's phase. The night side is drawn three
-// times with the terminator nudged, so its edge is soft rather than cut, and
-// a little earthshine is left showing.
-function MoonDisc({ size, phase }: { size: number; phase: number }) {
+// The photographed sun: the red chromosphere near the horizon, the gold
+// corona toward noon, crossfaded by its height where you are, with a tint on
+// top. Live from SDO when online, yesterday's frames when not.
+function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky }) {
   const r = size / 2;
+  const box = size / SDO_DISC;
+  const high = Math.pow(sky.sun, 0.7);
+  const low = 1 - high;
+  return (
+    <>
+      <Frame id="sun" size={size} disc={SDO_DISC} caption>
+        <Image href={live.sunHot ? { uri: live.sunHot } : SUN_HOT} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+        <Image href={live.sunGold ? { uri: live.sunGold } : SUN_GOLD} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" opacity={high} />
+      </Frame>
+      <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
+        <Circle cx={r} cy={r} r={r} fill={low > 0.5 ? '#ff2a00' : '#fff1bd'} fillOpacity={low > 0.5 ? 0.1 + 0.3 * (low - 0.5) : 0.22 * (1 - low * 2)} />
+      </Svg>
+    </>
+  );
+}
+
+// The photographed moon. Online, this hour's NASA frame: real phase, tilt and
+// libration, nothing drawn. Offline, the bundled full moon with tonight's
+// phase drawn as a night side, three times with the terminator nudged so its
+// edge is soft, and a little earthshine left showing.
+function MoonDisc({ size, phase, live }: { size: number; phase: number; live: LiveSky }) {
+  const r = size / 2;
+  if (live.moon) {
+    const box = size / SVS_DISC;
+    return (
+      <Frame id="moon" size={size} disc={SVS_DISC}>
+        <Image href={{ uri: live.moon }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+      </Frame>
+    );
+  }
   const shifted = (d: number) => {
     // move the terminator toward the lit side by d of the radius, for a soft edge
     const c = Math.cos(2 * Math.PI * phase);
@@ -179,6 +212,8 @@ export function Breath({ visible, density }: { visible: boolean; density: number
   };
   const [sky, setSky] = useState(() => skyAt(hourNow()));
   const [phase, setPhase] = useState(() => moonAt(Date.now() / 1000).phase);
+  const [live, setLive] = useState<LiveSky>({});
+  useEffect(() => subscribeLiveSky(setLive), []);
   useEffect(() => {
     const timer = setInterval(() => {
       setSky(skyAt(hourNow()));
@@ -234,12 +269,12 @@ export function Breath({ visible, density }: { visible: boolean; density: number
         </Svg>
       </Animated.View>
 
-      <Animated.View style={[styles.layer, orb, { width: size, height: size }]}>
-        <View style={{ opacity: daylight }}>
-          <SunDisc size={size} sky={sky} />
+      <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
+        <View style={[StyleSheet.absoluteFill, styles.body, { opacity: daylight }]}>
+          <SunDisc size={size} sky={sky} live={live} />
         </View>
-        <View style={[StyleSheet.absoluteFill, { opacity: 1 - daylight }]}>
-          <MoonDisc size={size} phase={phase} />
+        <View style={[StyleSheet.absoluteFill, styles.body, { opacity: 1 - daylight }]}>
+          <MoonDisc size={size} phase={phase} live={live} />
         </View>
       </Animated.View>
 
@@ -255,5 +290,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   layer: { position: 'absolute' },
+  body: { overflow: 'visible' },
   dot: { position: 'absolute', width: 10, height: 10 },
 });
