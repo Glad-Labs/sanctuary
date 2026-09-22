@@ -111,7 +111,7 @@ function Frame({ id, size, disc, caption, children }: { id: string; size: number
     <Svg width={box} height={box} style={{ position: 'absolute', left: off, top: off }}>
       <Defs>
         <RadialGradient id={`${id}Fade`} cx="50%" cy="50%" r="50%">
-          <Stop offset="0.9" stopColor="#ffffff" stopOpacity="1" />
+          <Stop offset={String(Math.min(0.99, disc + 0.012))} stopColor="#ffffff" stopOpacity="1" />
           <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
         <Mask id={`${id}Mask`}>
@@ -282,6 +282,13 @@ export function Breath({ visible, density }: { visible: boolean; density: number
   const dots = useMemo(() => Array.from({ length: DOTS }, (_, i) => i), []);
   const box = size * 2.6;
   const { palette, daylight } = sky;
+  // The aura is a ring just outside the body that breathes outward: the sun's
+  // colour by day, moonlight white by night.
+  const aura = daylight > 0.5 ? palette.glow : '#eef2ff';
+  // Hand over from sun to moon with a short dissolve rather than a long
+  // blend, so neither body shows through the other for more than minutes.
+  const sunOpacity = Math.min(1, Math.max(0, (daylight - 0.4) / 0.2));
+  const moonOpacity = Math.min(1, Math.max(0, (0.6 - daylight) / 0.2));
   return (
     <View style={[styles.wrap, { width: box, height: box }]}>
       <Svg style={StyleSheet.absoluteFill} width={box} height={box}>
@@ -298,9 +305,10 @@ export function Breath({ visible, density }: { visible: boolean; density: number
         <Svg width={size} height={size}>
           <Defs>
             <RadialGradient id="glow" cx="50%" cy="50%" r="50%">
-              <Stop offset="0" stopColor={palette.glow} stopOpacity={daylight > 0.5 ? 0.6 : 0.4} />
-              <Stop offset="0.45" stopColor={palette.glow} stopOpacity="0.18" />
-              <Stop offset="1" stopColor={palette.glow} stopOpacity="0" />
+              <Stop offset="0.8" stopColor={aura} stopOpacity="0" />
+              <Stop offset="0.88" stopColor={aura} stopOpacity={daylight > 0.5 ? 0.55 : 0.45} />
+              <Stop offset="0.95" stopColor={aura} stopOpacity="0.18" />
+              <Stop offset="1" stopColor={aura} stopOpacity="0" />
             </RadialGradient>
           </Defs>
           <Circle cx={size / 2} cy={size / 2} r={size / 2} fill="url(#glow)" />
@@ -309,24 +317,24 @@ export function Breath({ visible, density }: { visible: boolean; density: number
 
       <Animated.View style={[styles.layer, ring, { width: size, height: size }]}>
         <Svg width={size} height={size}>
-          <Circle cx={size / 2} cy={size / 2} r={size / 2 - 1} stroke={palette.glow} strokeWidth={1} fill="none" />
+          <Circle cx={size / 2} cy={size / 2} r={size / 2 - 1} stroke={aura} strokeWidth={1} fill="none" />
         </Svg>
       </Animated.View>
 
       <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
-        {daylight > 0 && (
-          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: daylight }]}>
+        {sunOpacity > 0 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: sunOpacity }]}>
             <SunDisc size={size} sky={sky} live={live} />
           </View>
         )}
-        {daylight < 1 && (
-          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: 1 - daylight }]}>
+        {moonOpacity > 0 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: moonOpacity }]}>
             <MoonDisc size={size} phase={phase} live={live} />
           </View>
         )}
       </Animated.View>
 
-      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} density={densityValue} size={size} colour={palette.glow} />)}
+      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} density={densityValue} size={size} colour={aura} />)}
     </View>
   );
 }
