@@ -30,6 +30,10 @@ afterward? Put it in front of twenty people with their eyes closed.
 - **One shared breath** (`src/breath.ts`). Four seconds in, four out, phased
   from the wall clock so the whole world inhales together. The sphere swells,
   the sound swells, the phone pulses at each turn of the breath.
+- **The sky is real.** By day the orb is the sun, a NASA Solar Dynamics
+  Observatory photograph tinted by how high it stands where you are; by
+  night it is the moon, a NASA photograph lit as the real moon is tonight,
+  phase computed on the device. Credits in `assets/sky/CREDITS.md`.
 - **Time of day is yours, the music is everyone's.** The room is global and
   has no night of its own, so the score is written for the mixture of local
   hours of the people actually in it, never for a clock. On your device, your
