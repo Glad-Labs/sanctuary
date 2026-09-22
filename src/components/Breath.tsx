@@ -4,10 +4,12 @@ import Animated, {
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
+  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Circle, ClipPath, Defs, G, Image, Mask, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
-import { SDO_DISC, SVS_DISC, subscribeLiveSky, type LiveSky } from '../sky/live';
+import { SDO_DISC, SVS_DISC, moonLapseUris, subscribeLiveSky, type LiveSky } from '../sky/live';
+import { SunVideo } from '../sky/SunVideo';
 
 // Real photographs, public domain: the sun from NASA's Solar Dynamics
 // Observatory (two wavelengths) and the full moon from NASA's Scientific
@@ -136,9 +138,49 @@ function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky })
         <Image href={live.sunHot ? { uri: live.sunHot } : SUN_HOT} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
         <Image href={live.sunGold ? { uri: live.sunGold } : SUN_GOLD} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" opacity={high} />
       </Frame>
+      <SunVideo size={size} disc={SDO_DISC} high={high} nowMs={live.at ?? 0} />
       <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
         <Circle cx={r} cy={r} r={r} fill={low > 0.5 ? '#ff2a00' : '#fff1bd'} fillOpacity={low > 0.5 ? 0.1 + 0.3 * (low - 0.5) : 0.22 * (1 - low * 2)} />
       </Svg>
+    </>
+  );
+}
+
+// The moon over the last two days, as a slow time-lapse of NASA's hourly
+// frames: it librates and the terminator creeps. Plays forward and back so it
+// never jumps. Two layers crossfade so each step is a dissolve, not a cut.
+function MoonLapse({ size, frames }: { size: number; frames: string[] }) {
+  const box = size / SVS_DISC;
+  const [pair, setPair] = useState<{ a: string; b: string; showB: boolean }>({ a: frames[frames.length - 1], b: frames[frames.length - 1], showB: false });
+  const fade = useSharedValue(0);
+  useEffect(() => {
+    if (frames.length < 2) return;
+    let i = frames.length - 1;
+    let dir = -1;
+    let showB = false;
+    const timer = setInterval(() => {
+      i += dir;
+      if (i <= 0 || i >= frames.length - 1) dir = -dir;
+      showB = !showB;
+      setPair((p) => (showB ? { a: p.a, b: frames[i], showB } : { a: frames[i], b: p.b, showB }));
+      fade.value = withTiming(showB ? 1 : 0, { duration: 1800 });
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [frames, fade]);
+  const aStyle = useAnimatedStyle(() => ({ opacity: 1 - fade.value }));
+  const bStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
+  return (
+    <>
+      <Animated.View style={[StyleSheet.absoluteFill, aStyle]}>
+        <Frame id="moonA" size={size} disc={SVS_DISC}>
+          <Image href={{ uri: pair.a }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+        </Frame>
+      </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFill, bStyle]}>
+        <Frame id="moonB" size={size} disc={SVS_DISC}>
+          <Image href={{ uri: pair.b }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+        </Frame>
+      </Animated.View>
     </>
   );
 }
@@ -149,6 +191,7 @@ function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky })
 // edge is soft, and a little earthshine left showing.
 function MoonDisc({ size, phase, live }: { size: number; phase: number; live: LiveSky }) {
   const r = size / 2;
+  if (live.moonLapse && live.moonLapse.length >= 2) return <MoonLapse size={size} frames={live.moonLapse} />;
   if (live.moon) {
     const box = size / SVS_DISC;
     return (
@@ -211,6 +254,7 @@ export function Breath({ visible, density }: { visible: boolean; density: number
     return d.getHours() + d.getMinutes() / 60;
   };
   const [sky, setSky] = useState(() => skyAt(hourNow()));
+  if (__DEV__) (globalThis as any).__sky = { sky, hour: hourNow() };
   const [phase, setPhase] = useState(() => moonAt(Date.now() / 1000).phase);
   const [live, setLive] = useState<LiveSky>({});
   useEffect(() => subscribeLiveSky(setLive), []);
@@ -270,12 +314,16 @@ export function Breath({ visible, density }: { visible: boolean; density: number
       </Animated.View>
 
       <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
-        <View style={[StyleSheet.absoluteFill, styles.body, { opacity: daylight }]}>
-          <SunDisc size={size} sky={sky} live={live} />
-        </View>
-        <View style={[StyleSheet.absoluteFill, styles.body, { opacity: 1 - daylight }]}>
-          <MoonDisc size={size} phase={phase} live={live} />
-        </View>
+        {daylight > 0 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: daylight }]}>
+            <SunDisc size={size} sky={sky} live={live} />
+          </View>
+        )}
+        {daylight < 1 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: 1 - daylight }]}>
+            <MoonDisc size={size} phase={phase} live={live} />
+          </View>
+        )}
       </Animated.View>
 
       {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} density={densityValue} size={size} colour={palette.glow} />)}
