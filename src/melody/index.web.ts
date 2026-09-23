@@ -90,6 +90,12 @@ export function setMelodyLevel(level: number): void {
   build(current, level).play();
 }
 
+/** What the melody scheduler is doing, for tests. */
+export function melodyInfo(): { cps: number | null; cycleSeconds: number | null; started: boolean; notes: string | null } {
+  const sch = (repl as unknown as { scheduler?: { cps?: number; started?: boolean } } | null)?.scheduler;
+  return { cps: sch?.cps ?? null, cycleSeconds: sch?.cps ? +(1 / sch.cps).toFixed(1) : null, started: !!sch?.started, notes: current?.notes ?? null };
+}
+
 /** RMS of the melody layer's output, 0..1, for proving it is sounding. */
 export function melodyLevel(): number {
   const w = strudel();

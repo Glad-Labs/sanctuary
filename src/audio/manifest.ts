@@ -7,7 +7,6 @@ export const SAMPLES: ReadonlyArray<SampleDef> = [
   { id: 'bass_30', kind: 'bass', midi: 30, file: 'bass_30.mp3' },
   { id: 'bass_34', kind: 'bass', midi: 34, file: 'bass_34.mp3' },
   { id: 'bowl_1', kind: 'bowl', midi: 62.2, file: 'bowl_1.mp3' },
-  { id: 'breeze', kind: 'bed', file: 'breeze.mp3' },
   { id: 'cello_36', kind: 'cello', midi: 36, file: 'cello_36.mp3' },
   { id: 'cello_40', kind: 'cello', midi: 40, file: 'cello_40.mp3' },
   { id: 'cello_43', kind: 'cello', midi: 43, file: 'cello_43.mp3' },

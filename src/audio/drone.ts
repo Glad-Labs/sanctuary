@@ -236,7 +236,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   padFilter.Q.value = 0.5;
   toBoth(padFilter);
 
-  // beds: sea and air, softened
+  // bed: the sea, softened
   const bedFilter = ctx.createBiquadFilter();
   bedFilter.type = 'lowpass';
   bedFilter.frequency.value = 3000;
@@ -297,7 +297,6 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     makeLayer('cymbal_bow_2', 0.75, 9, 4, 4.5, padFilter, 0.6),
   ];
   const sea = makeLayer('ocean', 1, 22, 5, 0, bedFilter, 0);
-  const air = makeLayer('breeze', 1, 22, 5, 11, bedFilter, 0.2);
 
   /** Schedule instance k of a layer; `at` is audio time, `offset` how far in (wall s) it already is. */
   function scheduleInstance(layer: Layer, k: number, startWall: number, at: number, offset: number) {
@@ -405,8 +404,6 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     advance(sea, wall, now, true);
     // the sea is what remains when the tide is out
     sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
-    advance(air, wall, now, true);
-    air.gain.gain.setTargetAtTime(0.025, now, 4);
     breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
 
     // bowls: once per window, more often as the room fills, at a moment everyone shares

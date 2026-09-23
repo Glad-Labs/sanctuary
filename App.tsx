@@ -6,7 +6,7 @@ import { AudioContext, AudioManager } from 'react-native-audio-api';
 import { subscribeScore } from './src/arranger/client';
 import { createDrone, energyAt, localBalance, type Drone } from './src/audio/drone';
 import { loadBuffers } from './src/audio/load';
-import { initMelody, melodyLevel, playMelody, setMelodyLevel } from './src/melody';
+import { initMelody, melodyInfo, melodyLevel, playMelody, setMelodyLevel } from './src/melody';
 import { breathAt, type BreathPhase } from './src/breath';
 import { Breath } from './src/components/Breath';
 import { presenceAt, subscribePresence } from './src/presence';
@@ -45,7 +45,7 @@ export default function App() {
       .then((buffers) => {
         if (cancelled) return;
         droneRef.current = createDrone(ctx, ROOM, { buffers });
-        if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt, melodyLevel };
+        if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt, melodyLevel, melodyInfo };
         if (ctx.state === 'suspended') {
           setWaitingForTouch(true);
           Animated.timing(hint, { toValue: 1, duration: 1500, delay: 400, useNativeDriver: NATIVE_ANIM }).start();

@@ -10,3 +10,6 @@ export function setMelodyLevel(_level: number): void {}
 export function melodyLevel(): number {
   return 0;
 }
+export function melodyInfo(): { cps: number | null; cycleSeconds: number | null; started: boolean; notes: string | null } {
+  return { cps: null, cycleSeconds: null, started: false, notes: null };
+}
