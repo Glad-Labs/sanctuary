@@ -183,7 +183,7 @@ export interface Drone {
   /** How present the melody should be right now, 0..1: it comes and goes like every other layer. */
   melodyPresence(wall?: number): number;
   /** What the engine is doing right now, for the curious and for tests. */
-  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number; bowls: number };
+  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number; bowls: number; calm: number };
 }
 
 interface Layer {
@@ -278,7 +278,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let density = 0.5;
   let listeners = 0;
   const voiceState: number[] = ROLES.map(() => 0);
-  let last = { voicesNow: 0, energy: 0, shimmer: 0, bowlWindow: 0 };
+  let last = { voicesNow: 0, energy: 0, shimmer: 0, bowlWindow: 0, calm: 0 };
   let running = false;
   let ticker: ReturnType<typeof setInterval> | undefined;
 
@@ -394,24 +394,29 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // the tide sets how much of the room is present right now
     const energy = energyAt(wall, sc.tide);
     const voices = Math.max(2, Math.round(activeVoices * (0.6 + 0.4 * sc.density)));
-    // how many voices may sound at once: fewer when the room is small or the tide is out
-    const voicesNow = 1 + energy * (voices - 1) * 0.8;
+    // how many voices may sound at once: fewer when the room is small or the
+    // tide is out, and fewer still during a spell of calm. Calm spells come
+    // around every several minutes; they run deep in a small room and shallow
+    // in a full one, so a full room overlaps and flows while a small one rests.
+    const calm = 1 - smoothstep(0.3, 0.6, weave(500, wall, 480)); // 1 = a spell of calm
+    const restDepth = 0.15 + 0.6 * (1 - density);
+    const voicesNow = (1 + energy * (voices - 1) * 0.85) * (1 - restDepth * calm);
     const threshold = 1 - voicesNow / ROLES.length;
 
     // voices: the floor is always there; every other voice has its own slow
     // tide of presence, and the room and the tide set how many can be above
     // water at once. The cello is favoured a little so the floor is rarely alone.
     slots.forEach((layer, s) => {
-      const own = s === 1 ? 0.25 + 0.75 * weave(101, wall, 190) : weave(100 + s, wall, 150 + 40 * s);
-      const presence = s === 0 ? 1 : smoothstep(threshold, threshold + 0.25, own);
+      const own = s === 1 ? 0.25 + 0.75 * weave(101, wall, 260) : weave(100 + s, wall, 220 + 50 * s);
+      const presence = s === 0 ? 1 : smoothstep(threshold, threshold + 0.3, own);
       advance(layer, wall, now, presence > 0.001);
       const lfo = 0.8 + 0.2 * Math.sin((TAU * wall) / slotLfo[s].period + slotLfo[s].phase);
       const seat = s >= 2 ? here.top : 1; // viola and above soften at your night
       const crowd = s >= 3 ? 0.7 + 0.6 * density : 1; // violins and flute come forward as the room fills
-      layer.gain.gain.setTargetAtTime(ROLES[s].level * lfo * presence * seat * crowd, now, 9);
+      layer.gain.gain.setTargetAtTime(ROLES[s].level * lfo * presence * seat * crowd, now, 12);
       voiceState[s] = presence;
     });
-    last = { ...last, voicesNow: voiceState.reduce((a, b) => a + b, 0) };
+    last = { ...last, voicesNow: voiceState.reduce((a, b) => a + b, 0), calm };
     // a full room is brighter and more open; an empty one is close and dark
     const warmth = (600 + 1800 * sc.warmth) * here.warmth * (0.55 + 0.75 * density);
     padFilter.frequency.setTargetAtTime(warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
@@ -419,7 +424,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.5 + 0.5 * density), now, 8);
 
     // textures: shimmer that only appears as the room fills, near the peak
-    const shimmerIn = smoothstep(0.5, 0.8, weave(300, wall, 240));
+    const shimmerIn = smoothstep(0.5, 0.8, weave(300, wall, 320)) * (1 - 0.8 * calm);
     const shimmer = (0.005 + 0.16 * clamp01((density - 0.25) / 0.75)) * energy * (0.3 + 1.4 * sc.shimmer) * shimmerIn;
     last = { ...last, energy, shimmer };
     textures.forEach((layer, i) => {
@@ -490,10 +495,11 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       density = densityFor(count);
     },
     melodyPresence(wall = Date.now() / 1000) {
-      return smoothstep(0.45, 0.75, weave(400, wall, 270));
+      const calm = 1 - smoothstep(0.3, 0.6, weave(500, wall, 480));
+      return smoothstep(0.45, 0.75, weave(400, wall, 330)) * (1 - 0.7 * calm);
     },
     status() {
-      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings, bowls };
+      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings, bowls, calm: +last.calm.toFixed(2) };
     },
     setScore(score) {
       if (score.validFrom <= Date.now() / 1000 && autoTick) current = score;
