@@ -21,12 +21,14 @@ import { moonAt } from '../arranger/inputs';
 import { breathAt, CYCLE_MS } from '../breath';
 
 // The points of light: one pool across the whole screen, lit by how many
-// people are here. The curve is steep at the start, so even a few dozen people
-// light the room, and flat at the top. The first points sit close to the orb
-// and later ones reach the edges, so a room fills outward as it grows.
-const DOTS = 220;
+// people are here. One point per person while the room is small, never more
+// points than people, easing into a full field of 240 as the room grows past
+// a few hundred. The first points sit close to the orb and later ones reach
+// the edges, so a room fills outward as it grows.
+const DOTS = 240;
 export function pointsFor(people: number): number {
-  return Math.round(DOTS * (1 - Math.exp(-Math.sqrt(Math.max(0, people)) / 11)));
+  const n = Math.max(0, people);
+  return Math.min(n, Math.round(DOTS * (1 - Math.exp(-n / DOTS))));
 }
 
 // ---- the sky where you are ------------------------------------------------

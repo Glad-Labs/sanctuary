@@ -25,7 +25,8 @@ afterward? Put it in front of twenty people with their eyes closed.
   Gongs are rare and soft. Samples and credits: `assets/samples/CREDITS.md`.
 - **Presence is heard and seen, never counted.** Listener count sets how many
   voices are present, how much shimmer there is, how often bowls ring, and
-  how many points of light orbit the sphere. Each arrival is a soft
+  how many points of light fill the screen: one per person while the room is
+  small, easing into a full field past a few hundred. Each arrival is a soft
   vibraphone ring.
 - **One shared breath** (`src/breath.ts`). Five seconds in, five out, the
   pace of a resting breath, with a natural pause at each end, phased from
