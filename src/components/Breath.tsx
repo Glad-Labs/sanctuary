@@ -104,9 +104,12 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
     const r = radius * (0.985 + 0.02 * breath);
     const wx = driftA * Math.sin((Math.PI * 2 * t) / period + f1);
     const wy = driftA * Math.cos((Math.PI * 2 * t) / (period * 1.3) + f2);
+    // a few people are big soft lights; a crowd is fine stars
+    const crowd = Math.min(1, lit.value / DOTS);
+    const grow = 1 + 2.4 * Math.pow(1 - crowd, 1.6);
     return {
       opacity: shown * (0.12 + 0.18 * breath + 0.6 * own) * (0.55 + 0.45 * energy.value),
-      transform: [{ translateX: Math.cos(a) * r + wx }, { translateY: Math.sin(a) * r + wy }],
+      transform: [{ translateX: Math.cos(a) * r + wx }, { translateY: Math.sin(a) * r + wy }, { scale: grow }],
     };
   });
   return (
