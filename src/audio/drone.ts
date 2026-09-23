@@ -186,6 +186,8 @@ export interface Drone {
   setScore(score: Score): void;
   /** The score in effect at this moment. */
   score(): CleanScore;
+  /** What is sounding now and what comes next, for a performer's console. */
+  harmony(wall?: number): { chord: ReadonlyArray<number>; next: ReadonlyArray<number>; nextIn: number; chordSeconds: number };
   /** Someone arrived; `count` is the room size now. Rings only for real growth, rarely. */
   join(audioNow?: number, count?: number): void;
   /** RMS of what is reaching the speaker, 0..1. For visuals and for proving sound is flowing. */
@@ -514,11 +516,27 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let melodyNotes = 0;
   const scheduledNotes = new Set<string>();
   let instancesStarted = 0;
+  let lastNow = -1;
+  let clockResets = 0;
 
   let lastDiag = 0;
   let diagStart: { wall: number; ctx: number } | null = null;
 
   function tick(wall: number, now: number) {
+    // On a phone the output stream can be closed and reopened under us (an
+    // audio route change, another audio engine in the process), and the
+    // context's clock restarts from zero. Everything scheduled against the
+    // old clock is stranded, so forget it all and reschedule from the wall
+    // clock at once; a listener hears a short dip instead of a minute of silence.
+    if (lastNow >= 0 && now < lastNow - 0.5) {
+      clockResets += 1;
+      for (const l of [...slots, ...textures, sea, air]) l.lastK = -1;
+      scheduledNotes.clear();
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(MASTER, now);
+      if (diagStart) diagStart = { wall, ctx: now };
+    }
+    lastNow = now;
     // One status line every five seconds, kept in release builds: on a phone
     // it is the only way to see that the clock and the scheduler are alive
     // with the screen off (adb logcat, grep "diag ctx").
@@ -526,7 +544,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       lastDiag = wall;
       if (!diagStart) diagStart = { wall, ctx: now };
       const drift = (now - diagStart.ctx) - (wall - diagStart.wall);
-      console.warn(`diag ctx=${now.toFixed(2)} drift=${drift.toFixed(3)}s state=${ctx.state} started=${instancesStarted} voices=${last.voicesNow.toFixed(2)} energy=${last.energy.toFixed(2)} calm=${last.calm.toFixed(2)} master=${master.gain.value.toFixed(2)} tide=${tideGain.gain.value.toFixed(2)}`);
+      console.warn(`diag ctx=${now.toFixed(2)} drift=${drift.toFixed(3)}s state=${ctx.state} started=${instancesStarted} resets=${clockResets} voices=${last.voicesNow.toFixed(2)} energy=${last.energy.toFixed(2)} calm=${last.calm.toFixed(2)} master=${master.gain.value.toFixed(2)} tide=${tideGain.gain.value.toFixed(2)}`);
     }
     if (pending && wall >= pending.validFrom) {
       current = pending;
@@ -663,6 +681,11 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     },
     score() {
       return current;
+    },
+    harmony(wall = Date.now() / 1000) {
+      const sc = scoreAt(wall);
+      const boundary = (Math.floor(wall / sc.chordSeconds) + 1) * sc.chordSeconds;
+      return { chord: chordAt(wall), next: chordAt(boundary + 0.01), nextIn: boundary - wall, chordSeconds: sc.chordSeconds };
     },
     join(audioNow = ctx.currentTime, count = listeners) {
       if (!running) return;

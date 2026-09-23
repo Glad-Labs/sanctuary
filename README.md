@@ -103,6 +103,27 @@ Render any score to listen to it:
 npx tsx scripts/render.ts 72 out.wav path/to/score.json
 ```
 
+## The stage
+
+A performer is one more layer in the weave, arriving over the network. Open
+the web build with `?perform=1&key=<performer key>&name=<your name>` for the
+performer console: it shows the voicing sounding now and the next one with
+its countdown, the tide, the calm, and who is here, and a go-live control
+that publishes the microphone (or a soft test tone with `&tone=1`) into the
+LiveKit room as high-quality stereo with echo cancellation, noise suppression
+and gain control off. The arranger mints performer tokens only against
+`PERFORMER_KEY` (default `sanctuary-stage-dev`; change it).
+
+Every listener already subscribes. On the web the track plays through an
+audio element; a phone joins the room only while someone is on stage, so
+WebRTC stays out of its audio path the rest of the time (another audio
+engine in the process makes the output stream reopen and the engine's clock
+reset, which the engine now survives by rescheduling from the wall clock).
+Within fifteen seconds of someone going live the arranger publishes a live
+score: harmony held for minutes at a time, few voices, no melody, the sea and
+shimmer back, titled with the performer's name; the previous kind of score
+returns when they leave.
+
 ## Trying the room at any size
 
 Add `?people=40` (or any number) to the web URL, or set
@@ -122,10 +143,14 @@ audio later.
 
 ```bash
 docker run -d --name sanctuary-livekit --restart unless-stopped \
-  -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
+  --network host \
   -v "$PWD/server/livekit.yaml:/etc/livekit.yaml:ro" \
   livekit/livekit-server:latest --config /etc/livekit.yaml
 ```
+
+Host networking matters: behind Docker's port mapping, WebRTC's media
+connection completes only for clients on this machine, and a phone on the
+Tailscale network is dropped a few seconds after joining.
 
 The arranger mints join tokens (`GET /token?room=rest&tz=<minutes east of
 UTC>`) and reports the room (`GET /presence`). `LIVEKIT_URL`,

@@ -32,32 +32,69 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL ?? 'ws://100.111.15.72:7880';
 const LIVEKIT_KEY = process.env.LIVEKIT_API_KEY ?? 'sanctuary-dev';
 const LIVEKIT_SECRET = process.env.LIVEKIT_API_SECRET ?? 'sanctuary-dev-secret-change-before-anyone-else-uses-this';
 const livekit = process.env.LIVEKIT_DISABLED ? null : new RoomServiceClient(LIVEKIT_URL.replace(/^ws/, 'http'), LIVEKIT_KEY, LIVEKIT_SECRET);
+// A performer joins with this key and may publish audio. Development value; change it.
+const PERFORMER_KEY = process.env.PERFORMER_KEY ?? 'sanctuary-stage-dev';
 
-/** The real room: how many are here and what hour it is for each of them. */
-async function livePresence(room: string): Promise<{ count: number; hours: number[] } | null> {
-  if (!livekit) return null;
-  try {
-    const participants = await livekit.listParticipants(room);
-    const hours = new Array<number>(24).fill(0);
-    const nowUtcHour = (Date.now() / 3_600_000) % 24;
-    for (const p of participants) {
-      let tz = 0;
-      try { tz = Number(JSON.parse(p.metadata || '{}').tz) || 0; } catch {}
-      const local = (((nowUtcHour + tz / 60) % 24) + 24) % 24;
-      hours[Math.floor(local)] += 1;
+// Listeners that are not in the LiveKit room (phones, which keep WebRTC out of
+// their audio path until a performer is live) report themselves with a
+// heartbeat instead: an id and a UTC offset every 30 s, forgotten after 90 s.
+const HEARTBEAT_TTL_MS = 90_000;
+const heartbeats = new Map<string, { tz: number; seen: number; room: string }>();
+
+type PresenceReport = { count: number; hours: number[]; performer: { name: string } | null };
+
+/** The real room: how many are here, what hour it is for each of them, and whether someone is on stage. */
+async function livePresence(room: string): Promise<PresenceReport> {
+  const hours = new Array<number>(24).fill(0);
+  const nowUtcHour = (Date.now() / 3_600_000) % 24;
+  const add = (tz: number) => { hours[Math.floor((((nowUtcHour + tz / 60) % 24) + 24) % 24)] += 1; };
+  let count = 0;
+  let performer: { name: string } | null = null;
+  const seen = new Set<string>();
+  if (livekit) {
+    try {
+      for (const p of await livekit.listParticipants(room)) {
+        let tz = 0, id = p.identity, role = '', name = '';
+        try { const m = JSON.parse(p.metadata || '{}'); tz = Number(m.tz) || 0; if (m.id) id = String(m.id); role = String(m.role ?? ''); name = String(m.name ?? ''); } catch {}
+        // on stage: a performer with a live, unmuted audio track
+        if (role === 'performer' && p.tracks.some((t) => t.type === 0 && !t.muted)) performer = { name: name || p.identity };
+        if (seen.has(id)) continue;
+        seen.add(id); count += 1; add(tz);
+      }
+    } catch (e) {
+      if (!(e instanceof Error && /not found/i.test(e.message))) console.warn('livekit presence failed:', e instanceof Error ? e.message : e);
     }
-    return { count: participants.length, hours };
-  } catch (e) {
-    if (!(e instanceof Error && /not found/i.test(e.message))) console.warn('livekit presence failed:', e instanceof Error ? e.message : e);
-    return { count: 0, hours: new Array<number>(24).fill(0) }; // no such room yet: empty
   }
+  const cutoff = Date.now() - HEARTBEAT_TTL_MS;
+  for (const [id, h] of heartbeats) {
+    if (h.seen < cutoff) { heartbeats.delete(id); continue; }
+    if (h.room !== room || seen.has(id)) continue;
+    seen.add(id); count += 1; add(h.tz);
+  }
+  return { count, hours, performer };
 }
 
-async function joinToken(room: string, tz: number): Promise<string> {
-  const identity = `listener-${randomBytes(6).toString('hex')}`;
-  const at = new AccessToken(LIVEKIT_KEY, LIVEKIT_SECRET, { identity, metadata: JSON.stringify({ tz }), ttl: '12h' });
-  at.addGrant({ roomJoin: true, room, canPublish: false, canSubscribe: true, canPublishData: false });
+async function joinToken(room: string, tz: number, performer?: { name: string }): Promise<string> {
+  const identity = performer ? `performer-${randomBytes(4).toString('hex')}` : `listener-${randomBytes(6).toString('hex')}`;
+  const metadata = performer ? { tz, role: 'performer', name: performer.name } : { tz };
+  const at = new AccessToken(LIVEKIT_KEY, LIVEKIT_SECRET, { identity, metadata: JSON.stringify(metadata), ttl: '12h' });
+  at.addGrant({ roomJoin: true, room, canPublish: Boolean(performer), canSubscribe: true, canPublishData: false });
   return at.toJwt();
+}
+
+/** With someone on stage the bed steps back: harmony held, few voices, no melody, room for a human. */
+function liveScore(body: CleanScore, name: string): CleanScore {
+  return {
+    ...body,
+    title: `With ${name}`,
+    reasoning: `${name} is on stage; the bed holds still beneath them.`,
+    chordSeconds: Math.max(body.chordSeconds, 150),
+    density: Math.min(body.density, 0.3),
+    sea: Math.min(body.sea, 0.5),
+    shimmer: Math.min(body.shimmer, 0.15),
+    bowls: Math.min(body.bowls, 0.1),
+    melody: undefined,
+  };
 }
 // Backends: 'anthropic' (Claude), 'ollama' (a local model on this machine), 'none' (composer only).
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -77,6 +114,8 @@ The melody: a sparse line floating above the strings, written in melody.notes as
 
 Tempo follows the room: when few people are here, longer chordSeconds and a longer melody cycle, fewer bowls, less shimmer; a full room may move a little faster and brighter. Never fast: this is a place to breathe.
 
+When inputs.performer is present a human is playing live over this bed; the server holds the harmony and thins the bed after you, so keep to the same key as the recent scores and change nothing abruptly.
+
 What people asked for, in their words: harmonious, slow, not constant, not synthetic, a little more variation in the notes, no headaches. Consonance matters more than surprise. Wide low voicings, sparse highs. Prefer pitch sets that share most notes with the previous score so the change feels like weather, not a cut. A major and its relatives are home; you may lean to F# minor, D lydian colour, or A mixolydian when most of the room is in its night, or on a new moon. Never a minor second inside an octave.
 
 The room is global, so it has no time of day of its own. inputs.room tells you what time it is for the people actually in it: the share in their night, morning, day and evening, and a 24-bin histogram of their local hours. Write for that mixture. inputs.dawnCity and inputs.moon are physically shared by everyone and are fair material for the title and the mood.
@@ -91,6 +130,7 @@ async function refineOllama(inputs: RoomInputs, draft: CleanScore, recent: unkno
   try {
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
+      signal: AbortSignal.timeout(180_000), // a cold model load can take a minute or two; never hang a score on it
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
@@ -143,12 +183,18 @@ async function refine(inputs: RoomInputs, draft: CleanScore): Promise<{ body: Cl
   }
 }
 
-async function arrange() {
+let lastPerformer: string | null = null;
+
+async function arrange(lead = LEAD_S) {
   const live = await livePresence(ROOM);
-  const inputs = roomInputs(Date.now(), live ?? undefined);
+  const inputs = roomInputs(Date.now(), livekit ? live : undefined);
   const draft = compose(inputs);
-  const { body, source, usage, error } = await refine(inputs, draft);
-  const validFrom = Math.floor(Date.now() / 1000) + LEAD_S;
+  // With someone on stage the bed is held still and the model has nothing to
+  // decide, so the live score comes straight from the composer, at once.
+  const refined = inputs.performer ? { body: draft, source: 'composer' as const } : await refine(inputs, draft);
+  const body = inputs.performer ? liveScore(refined.body, inputs.performer.name) : refined.body;
+  const { source, usage, error } = refined as { body: CleanScore; source: Score['source']; usage?: unknown; error?: string };
+  const validFrom = Math.floor(Date.now() / 1000) + lead;
   const score: Score = { ...body, validFrom, ttl: INTERVAL_S, source, model: source === 'model' ? MODEL_NAME ?? undefined : undefined };
   const entry: Entry = { at: Date.now(), inputs, draft, score, usage, error };
   history.push(entry);
@@ -164,14 +210,29 @@ createServer(async (req, res) => {
     const q = new URL(req.url, 'http://x').searchParams;
     const tz = Math.max(-840, Math.min(840, Number(q.get('tz')) || 0));
     const room = (q.get('room') ?? ROOM).replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || ROOM;
+    const wantsStage = q.get('role') === 'performer';
+    if (wantsStage && q.get('key') !== PERFORMER_KEY) {
+      res.writeHead(403, headers);
+      res.end(JSON.stringify({ error: 'not a performer key' }));
+      return;
+    }
+    const name = (q.get('name') ?? 'a performer').replace(/[^\w .'-]/g, '').slice(0, 40) || 'a performer';
     try {
-      const token = await joinToken(room, tz);
+      const token = await joinToken(room, tz, wantsStage ? { name } : undefined);
       res.writeHead(200, headers);
       res.end(JSON.stringify({ url: LIVEKIT_URL, token, room }));
     } catch (e) {
       res.writeHead(500, headers);
       res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
     }
+  } else if (req.url?.startsWith('/heartbeat')) {
+    const q = new URL(req.url, 'http://x').searchParams;
+    const id = (q.get('id') ?? '').replace(/[^a-z0-9_-]/gi, '').slice(0, 40);
+    const tz = Math.max(-840, Math.min(840, Number(q.get('tz')) || 0));
+    const room = (q.get('room') ?? ROOM).replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || ROOM;
+    if (id) heartbeats.set(id, { tz, seen: Date.now(), room });
+    res.writeHead(200, headers);
+    res.end(JSON.stringify(await livePresence(room)));
   } else if (req.url?.startsWith('/presence')) {
     res.writeHead(200, headers);
     res.end(JSON.stringify(await livePresence(ROOM)));
@@ -190,4 +251,13 @@ createServer(async (req, res) => {
 });
 
 arrange();
-setInterval(arrange, INTERVAL_S * 1000);
+setInterval(() => arrange(), INTERVAL_S * 1000);
+// someone stepping on or off the stage changes the score within half a minute
+setInterval(async () => {
+  const p = (await livePresence(ROOM)).performer?.name ?? null;
+  if (p !== lastPerformer) {
+    lastPerformer = p;
+    console.log(`[${new Date().toISOString()}] stage: ${p ? `${p} is live` : 'empty'}`);
+    arrange(20);
+  }
+}, 15_000);

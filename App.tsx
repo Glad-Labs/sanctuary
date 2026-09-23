@@ -9,13 +9,21 @@ import { loadBuffers } from './src/audio/load';
 import { breathAt, type BreathPhase } from './src/breath';
 import { Breath } from './src/components/Breath';
 import { presenceAt, subscribePresence } from './src/presence';
+import { PerformerConsole, performerParams } from './src/performer/Console';
 import { clockIsNative, every, pulse } from './modules/pulse';
 
 const ROOM = 'rest';
 if (Platform.OS !== 'web') {
-  // LiveKit needs WebRTC globals on native; harmless if the room is never joined
+  // LiveKit needs WebRTC globals on native; harmless if the room is never joined.
+  // Its audio session defaults to a phone-call configuration (in-communication
+  // mode, taking audio focus), which fights the room's own stream; tell it this
+  // is media and to leave focus and mode alone. We never start its session.
   try {
-    require('@livekit/react-native').registerGlobals();
+    const lk = require('@livekit/react-native');
+    lk.registerGlobals();
+    lk.AudioSession.configureAudio({
+      android: { audioTypeOptions: { ...lk.AndroidAudioTypePresets.media, manageAudioFocus: false, audioMode: 'normal' } },
+    }).catch((e: unknown) => console.warn('livekit audio config', e));
   } catch (e) {
     console.warn('livekit globals', e);
   }
@@ -25,14 +33,23 @@ const NATIVE_ANIM = Platform.OS !== 'web';
 const SCORE_URL =
   process.env.EXPO_PUBLIC_SCORE_URL ??
   (Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8091/score` : undefined);
-// The real room lives on LiveKit; the arranger mints the join token.
-const TOKEN_URL = SCORE_URL ? `${SCORE_URL.replace(/\/score$/, '')}/token?room=${ROOM}` : undefined;
+// The real room lives on LiveKit; the arranger mints the join token. A phone
+// reports presence with a heartbeat instead, keeping WebRTC out of its audio
+// path until a performer is live (another audio engine in the process makes
+// the output stream reopen and the engine's clock reset).
+const ARRANGER = SCORE_URL?.replace(/\/score$/, '');
+const TOKEN_URL = ARRANGER ? `${ARRANGER}/token?room=${ROOM}` : undefined;
+const HEARTBEAT_URL = ARRANGER ? `${ARRANGER}/heartbeat?room=${ROOM}` : undefined;
+const PRESENCE = Platform.OS === 'web' ? { tokenUrl: TOKEN_URL } : { tokenUrl: TOKEN_URL, heartbeatUrl: HEARTBEAT_URL, joinForPerformer: true };
+const PERFORM = performerParams();
 
 export default function App() {
   const ctxRef = useRef<AudioContext | null>(null);
   const droneRef = useRef<Drone | null>(null);
   const stopTickRef = useRef<(() => void) | null>(null);
   const [room, setRoom] = useState({ people: 0, energy: 0 });
+  const [performer, setPerformer] = useState<string | null>(null);
+  void performer; // felt in the sound (the live score), not shown
   const [waitingForTouch, setWaitingForTouch] = useState(false);
   const [started, setStarted] = useState(false);
   const hint = useRef(new Animated.Value(0)).current;
@@ -131,7 +148,7 @@ export default function App() {
       show();
       droneRef.current?.setListeners(n);
       if (event === 'join') droneRef.current?.join(undefined, n);
-    }, every, TOKEN_URL ? { tokenUrl: TOKEN_URL } : undefined);
+    }, every, ARRANGER ? { ...PRESENCE, onPerformer: (name) => { setPerformer(name); if (__DEV__) console.log(`stage: ${name ?? 'empty'}`); } } : undefined);
     const stopShow = every(show, 5000);
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
       droneRef.current?.setScore(score);
@@ -186,6 +203,7 @@ export default function App() {
       <StatusBar hidden />
       <Breath visible={started} people={room.people} energy={room.energy} />
       <Animated.Text style={[styles.hint, { opacity: hint }]}>touch anywhere</Animated.Text>
+      {PERFORM && ARRANGER && started && <PerformerConsole drone={droneRef.current} arranger={ARRANGER} room={ROOM} people={room.people} params={PERFORM} />}
     </Pressable>
   );
 }

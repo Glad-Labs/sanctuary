@@ -14,6 +14,8 @@ export interface RoomInputs {
   listeners: number;
   /** What time it is for the people in the room: share of listeners in each part of their day. */
   room: { night: number; morning: number; day: number; evening: number; hours: number[] };
+  /** Someone is on stage: a live stream is playing over the bed. */
+  performer?: { name: string };
 }
 
 /** Summarize a 24-bin local-hour histogram into shares of night, morning, day, evening. */
@@ -40,7 +42,7 @@ export function moonAt(unixSeconds: number): RoomInputs['moon'] {
 }
 
 /** Presence as measured: how many are here and the 24-bin histogram of their local hours. */
-export interface Presence { count: number; hours: number[] }
+export interface Presence { count: number; hours: number[]; performer?: { name: string } | null }
 
 export function roomInputs(nowMs: number = Date.now(), presence?: Presence): RoomInputs {
   const d = new Date(nowMs);
@@ -59,5 +61,6 @@ export function roomInputs(nowMs: number = Date.now(), presence?: Presence): Roo
     moon: moonAt(at),
     listeners: presence ? presence.count : presenceAt(nowMs),
     room: roomHours(presence ? presence.hours : presenceHoursAt(nowMs)),
+    performer: presence?.performer ?? undefined,
   };
 }
