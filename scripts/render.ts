@@ -35,7 +35,8 @@ async function main() {
   console.log(`energy ${energyAt(wall0, scoreBody.tide).toFixed(2)} -> ${energyAt(wall0 + SECONDS, scoreBody.tide).toFixed(2)}`);
   const score: Score = { ...scoreBody, validFrom: 0, ttl: 600, source: 'composer' };
   drone.setScore(score);
-  drone.setListeners(2400);
+  // LISTENERS=<n> to hear the room at a given size (default 2400).
+  drone.setListeners(Number(process.env.LISTENERS ?? 2400));
   drone.start(0);
   for (let s = 0; s < SECONDS; s += 0.2) {
     drone.tick(wall0 + s, s);

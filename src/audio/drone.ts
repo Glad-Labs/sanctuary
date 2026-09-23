@@ -109,8 +109,9 @@ const rateFor = (from: number, to: number) => Math.pow(2, (to - from) / 12);
 export function densityFor(listeners: number): number {
   return clamp01(Math.log10(Math.max(listeners, 40) / 40) / 2.5);
 }
+/** How many voices a room of this size can reach: two when nearly empty, all seven when packed. */
 export function voicesFor(listeners: number): number {
-  return 3 + Math.round(densityFor(listeners) * 3);
+  return 2 + Math.round(densityFor(listeners) * (ROLES.length - 2));
 }
 
 function pick(kinds: ReadonlyArray<SampleKind>, midi: number): SampleDef | undefined {
@@ -173,6 +174,8 @@ export interface Drone {
   join(audioNow?: number): void;
   /** RMS of what is reaching the speaker, 0..1. For visuals and for proving sound is flowing. */
   level(): number;
+  /** What the engine is doing right now, for the curious and for tests. */
+  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number };
 }
 
 interface Layer {
@@ -254,6 +257,8 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
 
   let activeVoices = 3;
   let density = 0.5;
+  let listeners = 0;
+  let last = { voicesNow: 0, energy: 0, shimmer: 0, bowlWindow: 0 };
   let running = false;
   let ticker: ReturnType<typeof setInterval> | undefined;
 
@@ -366,7 +371,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const here = localBalance(localHour(wall));
     // the tide sets how much of the room is present right now
     const energy = energyAt(wall, sc.tide);
-    const voices = Math.max(2, Math.round(activeVoices * (0.55 + 0.45 * sc.density)));
+    const voices = Math.max(2, Math.round(activeVoices * (0.6 + 0.4 * sc.density)));
     const voicesNow = 1 + energy * (voices - 1);
 
     // voices: enter with the tide and the room, low to high
@@ -379,10 +384,12 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     });
     const warmth = (600 + 1800 * sc.warmth) * here.warmth;
     padFilter.frequency.setTargetAtTime(warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
-    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level, now, 8);
+    // a full room is a little louder than an empty one
+    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.72 + 0.28 * density), now, 8);
 
     // textures: shimmer that only appears as the room fills, near the peak
     const shimmer = (0.01 + 0.07 * clamp01((density - 0.4) / 0.6)) * energy * (0.3 + 1.4 * sc.shimmer);
+    last = { ...last, voicesNow, energy, shimmer };
     textures.forEach((layer, i) => {
       advance(layer, wall, now, true);
       layer.gain.gain.setTargetAtTime(shimmer * (i === 0 ? 1 : 0.7), now, 6);
@@ -399,6 +406,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
 
     // bowls: once per window, more often as the room fills, at a moment everyone shares
     const bowlWindow = (60 - 30 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
+    last.bowlWindow = bowlWindow;
     const bw = Math.floor(wall / bowlWindow);
     if (bw !== lastBowlWindow && wall - bw * bowlWindow >= unit(seed, bw * 5) * (bowlWindow - 8)) {
       lastBowlWindow = bw;
@@ -436,8 +444,12 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     },
     tick,
     setListeners(count) {
+      listeners = count;
       activeVoices = voicesFor(count);
       density = densityFor(count);
+    },
+    status() {
+      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow) };
     },
     setScore(score) {
       if (score.validFrom <= Date.now() / 1000 && autoTick) current = score;

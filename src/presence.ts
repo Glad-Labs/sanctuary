@@ -49,11 +49,28 @@ export function presenceAt(ms: number): number {
   return base + Math.round(wander);
 }
 
+/**
+ * A way to try the room at any size: `?people=40` on the web URL, or
+ * `globalThis.__listenersOverride = 40` from a console. Null means the real
+ * (for now, simulated) room.
+ */
+export function presenceOverride(): number | null {
+  const g = globalThis as { __listenersOverride?: unknown; location?: { search?: string } };
+  if (typeof g.__listenersOverride === 'number' && g.__listenersOverride >= 0) return Math.round(g.__listenersOverride);
+  const search = g.location?.search;
+  if (search) {
+    const p = Number(new URLSearchParams(search).get('people'));
+    if (Number.isFinite(p) && p >= 0 && search.includes('people=')) return Math.round(p);
+  }
+  return null;
+}
+
 export function subscribePresence(listener: PresenceListener): () => void {
-  let last = presenceAt(Date.now());
+  const now = () => presenceOverride() ?? presenceAt(Date.now());
+  let last = now();
   listener(last);
   const timer = setInterval(() => {
-    const next = presenceAt(Date.now());
+    const next = now();
     if (next !== last) listener(next, next > last ? 'join' : 'leave');
     last = next;
   }, 1000);

@@ -101,6 +101,14 @@ Render any score to listen to it:
 npx tsx scripts/render.ts 72 out.wav path/to/score.json
 ```
 
+## Trying the room at any size
+
+Add `?people=40` (or any number) to the web URL, or set
+`globalThis.__listenersOverride = 4000` in a console, and the room becomes
+that size: voices, shimmer, bowls, and the points of light all follow.
+`__sanctuary.drone.status()` in a dev console shows what the engine is
+doing with it. Offline, `LISTENERS=40 npx tsx scripts/render.ts 30 out.wav`.
+
 ## What is stubbed
 
 - `src/presence.ts` simulates the listener count. It is a pure function of
