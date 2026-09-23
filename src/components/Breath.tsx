@@ -73,43 +73,65 @@ export function moonShadowPath(r: number, phase: number): string {
 }
 
 // ---- points of light -------------------------------------------------------
-// Each point drifts on its own slow orbit and pulses to its own private
-// rhythm: two slow sines with periods that never line up, so no two points
-// breathe alike, over a faint share of the room's breath.
+// Each point circles the orb very slowly while wandering on a path of its
+// own: a few slow sines in random directions with periods that never line
+// up, so it drifts, turns, and doubles back. Two guarantees, enforced every
+// frame: a point never leaves the screen, and never crosses the orb. Each
+// pulses to its own private rhythm over a faint share of the room's breath.
 function hash01(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 function Dot({ index, clock, lit, energy, size, field, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; field: { w: number; h: number }; colour: string }) {
-  // home position: a ring around the orb for the first points, out to the
-  // corners of the screen for the last, each with its own jitter
+  const halfW = field.w / 2;
+  const halfH = field.h / 2;
+  // home: near the orb for the first points, out toward the edges for the last
   const angle0 = hash01(index) * Math.PI * 2;
-  const reach = Math.pow(index / DOTS, 0.7) + hash01(index + 25) * 0.12;
-  const maxR = Math.hypot(field.w, field.h) / 2;
-  const radius = size * 0.62 + (maxR - size * 0.62) * Math.min(1, reach);
-  const period = 240 + hash01(index + 50) * 300; // four to nine minutes per slow turn
-  const driftA = 4 + hash01(index + 75) * 12; // px of wander
-  const d = 5 + Math.round(hash01(index + 400) * 7); // 5 to 12 px, glow included
   const dir = hash01(index + 150) < 0.5 ? 1 : -1;
-  const p1 = 6 + hash01(index + 200) * 10; // seconds
+  const orbit = 1500 + hash01(index + 50) * 2400; // 25 to 65 minutes per turn
+  const reach = Math.min(1, Math.pow(index / DOTS, 0.7) + hash01(index + 25) * 0.12);
+  const inner = size * 0.62 + 30;
+  const keepOut = size * 0.62 + 10; // never closer to the centre than this
+  // the wander: two slow motions per axis, larger for points far from the orb
+  const leash = 0.35 + 0.65 * reach;
+  const a1 = (22 + hash01(index + 60) * 40) * leash;
+  const a2 = (8 + hash01(index + 70) * 18) * leash;
+  const P = [0, 1, 2, 3].map((k) => 45 + hash01(index + 80 + k * 10) * 150); // seconds
+  const F = [0, 1, 2, 3].map((k) => hash01(index + 130 + k * 10) * Math.PI * 2);
+  const d = 5 + Math.round(hash01(index + 400) * 7); // 5 to 12 px, glow included
+  const p1 = 6 + hash01(index + 200) * 10; // pulse, seconds
   const p2 = 17 + hash01(index + 250) * 26;
   const f1 = hash01(index + 300) * Math.PI * 2;
   const f2 = hash01(index + 350) * Math.PI * 2;
   const style = useAnimatedStyle(() => {
     const t = clock.value / 1000;
     const shown = index < lit.value ? 1 : 0;
-    const a = angle0 + (dir * t * Math.PI * 2) / (period * 6); // a very slow turn about the orb
     const breath = breathAt(clock.value).fill;
     const own = (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p1 + f1)) * (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p2 + f2));
-    const r = radius * (0.985 + 0.02 * breath);
-    const wx = driftA * Math.sin((Math.PI * 2 * t) / period + f1);
-    const wy = driftA * Math.cos((Math.PI * 2 * t) / (period * 1.3) + f2);
     // a few people are big soft lights; a crowd is fine stars
     const crowd = Math.min(1, lit.value / DOTS);
     const grow = 1 + 2.4 * Math.pow(1 - crowd, 1.6);
+    const edge = (d * grow) / 2 + 4;
+    // the home circles the orb, its radius bounded by the screen in that direction
+    const ang = angle0 + (dir * Math.PI * 2 * t) / orbit;
+    const c = Math.cos(ang);
+    const sn = Math.sin(ang);
+    const rMax = Math.min(halfW / Math.max(0.001, Math.abs(c)), halfH / Math.max(0.001, Math.abs(sn))) - edge - a1 - a2;
+    const radius = inner + Math.max(0, rMax - inner) * reach;
+    let x = c * radius + a1 * Math.sin((Math.PI * 2 * t) / P[0] + F[0]) + a2 * Math.sin((Math.PI * 2 * t) / P[1] + F[1]);
+    let y = sn * radius + a1 * Math.cos((Math.PI * 2 * t) / P[2] + F[2]) + a2 * Math.sin((Math.PI * 2 * t) / P[3] + F[3]);
+    // never off the screen
+    x = Math.min(halfW - edge, Math.max(-halfW + edge, x));
+    y = Math.min(halfH - edge, Math.max(-halfH + edge, y));
+    // never across the orb
+    const dist = Math.hypot(x, y);
+    if (dist < keepOut) {
+      x = (x / Math.max(1, dist)) * keepOut;
+      y = (y / Math.max(1, dist)) * keepOut;
+    }
     return {
       opacity: shown * (0.12 + 0.18 * breath + 0.6 * own) * (0.55 + 0.45 * energy.value),
-      transform: [{ translateX: Math.cos(a) * r + wx }, { translateY: Math.sin(a) * r + wy }, { scale: grow }],
+      transform: [{ translateX: x }, { translateY: y }, { scale: grow }],
     };
   });
   return (
