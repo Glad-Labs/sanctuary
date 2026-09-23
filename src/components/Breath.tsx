@@ -344,7 +344,8 @@ function MoonDisc({ size, phase, live, clock }: { size: number; phase: number; l
 // points of light: more of them the more people are here.
 export function Breath({ visible, people, energy }: { visible: boolean; people: number; energy: number }) {
   const { width, height } = useWindowDimensions();
-  const size = Math.min(240, Math.round(Math.min(width, height) * 0.44));
+  // the window can report zero on the very first render; never draw a body smaller than a coin
+  const size = Math.max(24, Math.min(240, Math.round(Math.min(width, height) * 0.44)));
   const fill = useSharedValue(0);
   const clock = useSharedValue(Date.now());
   const lit = useSharedValue(pointsFor(people));
