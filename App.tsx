@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet } from 'react-native';
 import { AudioContext, AudioManager } from 'react-native-audio-api';
 import { subscribeScore } from './src/arranger/client';
-import { createDrone, densityFor, energyAt, localBalance, type Drone } from './src/audio/drone';
+import { createDrone, energyAt, localBalance, type Drone } from './src/audio/drone';
 import { loadBuffers } from './src/audio/load';
 import { initMelody, melodyLevel, playMelody, setMelodyLevel } from './src/melody';
 import { breathAt, type BreathPhase } from './src/breath';
@@ -21,7 +21,7 @@ const SCORE_URL =
 export default function App() {
   const ctxRef = useRef<AudioContext | null>(null);
   const droneRef = useRef<Drone | null>(null);
-  const [density, setDensity] = useState(0);
+  const [room, setRoom] = useState({ people: 0, energy: 0 });
   const [waitingForTouch, setWaitingForTouch] = useState(false);
   const [started, setStarted] = useState(false);
   const hint = useRef(new Animated.Value(0)).current;
@@ -84,7 +84,7 @@ export default function App() {
     let listeners = 0;
     const show = () => {
       const tide = droneRef.current?.score().tide;
-      setDensity(densityFor(listeners) * (0.35 + 0.65 * energyAt(Date.now() / 1000, tide)));
+      setRoom({ people: listeners, energy: energyAt(Date.now() / 1000, tide) });
     };
     const unsubscribe = subscribePresence((n, event) => {
       listeners = n;
@@ -140,7 +140,7 @@ export default function App() {
   return (
     <Pressable style={styles.screen} onPress={onTouch}>
       <StatusBar hidden />
-      <Breath visible={started} density={density} />
+      <Breath visible={started} people={room.people} energy={room.energy} />
       <Animated.Text style={[styles.hint, { opacity: hint }]}>touch anywhere</Animated.Text>
     </Pressable>
   );

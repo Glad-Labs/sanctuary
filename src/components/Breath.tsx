@@ -20,7 +20,13 @@ const MOON_TEXTURE = require('../../assets/sky/moon.jpg');
 import { moonAt } from '../arranger/inputs';
 import { breathAt, CYCLE_MS } from '../breath';
 
-const DOTS = 28;
+// The points of light: one pool, lit by how many people are here. The count
+// follows a saturating curve, steep at first and flat at the top, so a few
+// hundred people already look like company and a great crowd becomes a field.
+const DOTS = 140;
+export function pointsFor(people: number): number {
+  return Math.round(DOTS * (1 - Math.exp(-Math.max(0, people) / 2500)));
+}
 
 // ---- the sky where you are ------------------------------------------------
 // By day the orb is the sun, coloured by how high it stands; by night it is
@@ -71,10 +77,11 @@ function hash01(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
-function Dot({ index, clock, density, size, colour }: { index: number; clock: SharedValue<number>; density: SharedValue<number>; size: number; colour: string }) {
+function Dot({ index, clock, lit, energy, size, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; colour: string }) {
   const angle0 = hash01(index) * Math.PI * 2;
   const period = 240 + hash01(index + 50) * 300; // four to nine minutes per orbit
-  const radius = size * (0.68 + hash01(index + 100) * 0.42);
+  const radius = size * (0.64 + hash01(index + 100) * 0.62);
+  const d = 6 + Math.round(hash01(index + 400) * 6); // 6 to 12 px, glow included
   const dir = hash01(index + 150) < 0.5 ? 1 : -1;
   const p1 = 6 + hash01(index + 200) * 10; // seconds
   const p2 = 17 + hash01(index + 250) * 26;
@@ -82,19 +89,18 @@ function Dot({ index, clock, density, size, colour }: { index: number; clock: Sh
   const f2 = hash01(index + 350) * Math.PI * 2;
   const style = useAnimatedStyle(() => {
     const t = clock.value / 1000;
-    const shown = index < Math.round(DOTS * density.value) ? 1 : 0;
+    const shown = index < lit.value ? 1 : 0;
     const a = angle0 + (dir * t * Math.PI * 2) / period;
     const breath = breathAt(clock.value).fill;
     const own = (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p1 + f1)) * (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p2 + f2));
     const r = radius * (0.97 + 0.04 * breath + 0.02 * own);
     return {
-      opacity: shown * (0.12 + 0.18 * breath + 0.6 * own),
+      opacity: shown * (0.12 + 0.18 * breath + 0.6 * own) * (0.55 + 0.45 * energy.value),
       transform: [{ translateX: Math.cos(a) * r }, { translateY: Math.sin(a) * r }],
     };
   });
-  const d = 10;
   return (
-    <Animated.View style={[styles.dot, style]}>
+    <Animated.View style={[styles.dot, { width: d, height: d }, style]}>
       <Svg width={d} height={d}>
         <Defs>
           <RadialGradient id={`dot${index}`} cx="50%" cy="50%" r="50%">
@@ -262,15 +268,17 @@ function MoonDisc({ size, phase, live, clock }: { size: number; phase: number; l
 // ---- the orb ---------------------------------------------------------------
 // The sun or the moon, breathing with everyone, in a soft glow, ringed by
 // points of light: more of them the more people are here.
-export function Breath({ visible, density }: { visible: boolean; density: number }) {
+export function Breath({ visible, people, energy }: { visible: boolean; people: number; energy: number }) {
   const { width, height } = useWindowDimensions();
   const size = Math.min(240, Math.round(Math.min(width, height) * 0.44));
   const fill = useSharedValue(0);
   const clock = useSharedValue(Date.now());
-  const densityValue = useSharedValue(density);
+  const lit = useSharedValue(pointsFor(people));
+  const energyValue = useSharedValue(energy);
   useEffect(() => {
-    densityValue.value = density;
-  }, [density, densityValue]);
+    lit.value = pointsFor(people);
+    energyValue.value = energy;
+  }, [people, energy, lit, energyValue]);
 
   useFrameCallback(() => {
     const now = Date.now();
@@ -303,7 +311,7 @@ export function Breath({ visible, density }: { visible: boolean; density: number
   const sunBreath = useAnimatedStyle(() => ({ opacity: 0.02 + 0.16 * fill.value }));
   const glow = useAnimatedStyle(() => ({
     transform: [{ scale: 1.15 + 0.45 * fill.value }],
-    opacity: visible ? (0.35 + 0.45 * fill.value) * (0.5 + 0.7 * densityValue.value) : 0,
+    opacity: visible ? (0.35 + 0.45 * fill.value) * (0.6 + 0.5 * Math.min(1, lit.value / DOTS) + 0.2 * energyValue.value) : 0,
   }));
   const ring = useAnimatedStyle(() => ({
     transform: [{ scale: 1.5 + 0.3 * fill.value }],
@@ -365,7 +373,7 @@ export function Breath({ visible, density }: { visible: boolean; density: number
         )}
       </Animated.View>
 
-      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} density={densityValue} size={size} colour={aura} />)}
+      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} colour={aura} />)}
     </View>
   );
 }
@@ -378,5 +386,5 @@ const styles = StyleSheet.create({
   },
   layer: { position: 'absolute' },
   body: { overflow: 'visible' },
-  dot: { position: 'absolute', width: 10, height: 10 },
+  dot: { position: 'absolute' },
 });
