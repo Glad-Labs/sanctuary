@@ -20,6 +20,7 @@ import type {
 import { breathAt } from '../breath';
 import { DEFAULT_SCORE, type Score, type CleanScore } from '../arranger/score';
 import { SAMPLES, type SampleDef, type SampleKind } from './manifest';
+import { eventsForCycle } from './pattern';
 
 export type Buffers = Map<string, AudioBuffer>;
 
@@ -180,10 +181,8 @@ export interface Drone {
   join(audioNow?: number, count?: number): void;
   /** RMS of what is reaching the speaker, 0..1. For visuals and for proving sound is flowing. */
   level(): number;
-  /** How present the melody should be right now, 0..1: it comes and goes like every other layer. */
-  melodyPresence(wall?: number): number;
   /** What the engine is doing right now, for the curious and for tests. */
-  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number; bowls: number; calm: number };
+  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number; bowls: number; calm: number; melodyNotes: number };
 }
 
 interface Layer {
@@ -253,6 +252,16 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   padFilter.frequency.value = 2400;
   padFilter.Q.value = 0.5;
   toBoth(padFilter);
+
+  // the melody: a sparse line above the strings, played by the flute or a
+  // violin, in its own soft light and the same hall
+  const melodyFilter = ctx.createBiquadFilter();
+  melodyFilter.type = 'lowpass';
+  melodyFilter.frequency.value = 2600;
+  const melodyBus = ctx.createGain();
+  melodyBus.gain.value = 0;
+  melodyBus.connect(melodyFilter);
+  toBoth(melodyFilter);
 
   // bed: the sea, softened
   const bedFilter = ctx.createBiquadFilter();
@@ -377,6 +386,53 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     src.start(at);
   }
 
+  function melodyNote(midi: number, at: number, seconds: number, m: NonNullable<CleanScore['melody']>) {
+    const def = pick(m.sound === 'triangle' ? ['violin'] : ['flute'], midi);
+    const buffer = def && buffers.get(def.id);
+    if (!def || !buffer || def.midi === undefined) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true; // the sustains are baked loops, so a note can be as long as the pattern says
+    src.playbackRate.value = rateFor(def.midi, midi);
+    const attack = Math.max(0.3, m.attack);
+    const release = Math.max(1, m.release);
+    const hold = Math.max(0.2, seconds - attack * 0.5);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, at);
+    env.gain.linearRampToValueAtTime(m.gain * 0.9, at + attack);
+    env.gain.setValueAtTime(m.gain * 0.9, at + attack + hold);
+    env.gain.setTargetAtTime(0, at + attack + hold, release / 3);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = 0.5 * Math.sin(midi * 1.7);
+    src.connect(env);
+    env.connect(panner);
+    panner.connect(melodyBus);
+    src.start(at);
+    src.stop(at + attack + hold + release * 1.5);
+    melodyNotes += 1;
+  }
+
+  /** Keep the melody scheduled a little ahead of `wall`, on the shared clock. */
+  function advanceMelody(sc: CleanScore, wall: number, now: number) {
+    const m = sc.melody;
+    if (!m) return;
+    const cyc = m.cycleSeconds;
+    const k0 = Math.floor(wall / cyc);
+    for (const k of [k0, k0 + 1]) {
+      let events;
+      try { events = eventsForCycle(m.notes, k); } catch { return; }
+      events.forEach((e, i) => {
+        const startWall = (k + e.start) * cyc;
+        if (startWall < wall - 0.25 || startWall > wall + 1.5) return;
+        const key = `${m.notes}|${k}|${i}`;
+        if (scheduledNotes.has(key)) return;
+        scheduledNotes.add(key);
+        if (scheduledNotes.size > 400) scheduledNotes.delete(scheduledNotes.values().next().value as string);
+        melodyNote(e.midi, now + Math.max(0, startWall - wall), e.duration * cyc, m);
+      });
+    }
+  }
+
   let lastBowlWindow = -1;
   let lastGongWindow = -1;
   let arrivals = 0;
@@ -384,6 +440,8 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let lastRingListeners = 0;
   let rings = 0;
   let bowls = 0;
+  let melodyNotes = 0;
+  const scheduledNotes = new Set<string>();
 
   function tick(wall: number, now: number) {
     if (pending && wall >= pending.validFrom) {
@@ -432,6 +490,12 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       advance(layer, wall, now, true);
       layer.gain.gain.setTargetAtTime(shimmer * (i === 0 ? 1 : 0.7), now, 6);
     });
+
+    // the melody follows the tide, the listener's hour, the size of the room,
+    // and its own tide of presence, like the upper strings
+    const melodyIn = smoothstep(0.45, 0.75, weave(400, wall, 330)) * (1 - 0.7 * calm);
+    melodyBus.gain.setTargetAtTime(energy * here.top * (0.25 + 0.75 * density) * melodyIn, now, 4);
+    advanceMelody(sc, wall, now);
 
     // beds: the sea breathes with everyone
     const { fill } = breathAt(wall * 1000);
@@ -499,12 +563,8 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       activeVoices = voicesFor(count);
       density = densityFor(count);
     },
-    melodyPresence(wall = Date.now() / 1000) {
-      const calm = 1 - smoothstep(0.3, 0.6, weave(500, wall, 480));
-      return smoothstep(0.45, 0.75, weave(400, wall, 330)) * (1 - 0.7 * calm);
-    },
     status() {
-      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings, bowls, calm: +last.calm.toFixed(2) };
+      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings, bowls, calm: +last.calm.toFixed(2), melodyNotes };
     },
     setScore(score) {
       if (score.validFrom <= Date.now() / 1000 && autoTick) current = score;

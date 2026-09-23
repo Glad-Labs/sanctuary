@@ -1,6 +1,7 @@
 // The score: what the arranger writes and the engine reads. One per room,
 // shared by every device, applied at `validFrom` so everyone changes together.
 import { z } from 'zod';
+import { parsePattern } from '../audio/pattern';
 
 // Loose shape handed to the model as the output format. Constraints live in
 // `sanitize`, because a strict local check is what keeps bad output out of the speakers.
@@ -26,7 +27,7 @@ export const ScoreShape = z.object({
       notes: z
         .string()
         .describe(
-          'A slow melody in Strudel mini-notation: lowercase note names with octave (a3 to b5) and ~ for rests, 8 to 16 steps, mostly rests, only tones of the voicings above. Example: "a4 ~ ~ e5 ~ c#5 ~ ~ b4 ~ ~ ~ e5 ~ ~ ~"',
+          'A slow melody in a small notation: lowercase note names with octave (a3 to b5) and ~ for rests, 8 to 16 steps, mostly rests, only tones of the voicings above. Example: "a4 ~ ~ e5 ~ c#5 ~ ~ b4 ~ ~ ~ e5 ~ ~ ~"',
         ),
       cycleSeconds: z.number().describe('Seconds for one pass through the melody. 24 to 64.'),
       sound: z.string().describe('sine or triangle.'),
@@ -97,7 +98,7 @@ export function sanitizeChord(notes: unknown): number[] | null {
 }
 
 const NOTE_NAME = /[a-g][#b]?[2-6]/g;
-const TOKEN = /^(~|[a-g][#b]?[2-6])([*/@]\d+(\.\d+)?|!|\?)*$/;
+const TOKEN = /^(~|[a-g][#b]?[2-6])(@\d+(\.\d+)?|\*\d+|!)*$/;
 const PITCH: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
 function pitchClass(name: string): number {
   const base = PITCH[name[0]];
@@ -115,18 +116,23 @@ export function sanitizeMelody(input: unknown, chords: number[][]): Melody | nul
   const m = input as Record<string, unknown>;
   let notes = String(m.notes ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!notes || notes.length > 240) return null;
-  if (!/^[a-g#b0-9~ [\]<>*/@!?.,]*$/.test(notes)) return null;
+  if (!/^[a-g#b0-9~ [\]<>*@!.]*$/.test(notes)) return null;
   const depth = (open: string, close: string) => {
     let d = 0;
     for (const ch of notes) { if (ch === open) d++; else if (ch === close && --d < 0) return -1; }
     return d;
   };
   if (depth('[', ']') !== 0 || depth('<', '>') !== 0) return null;
-  const tokens = notes.replace(/[[\]<>,]/g, ' ').split(' ').filter(Boolean);
+  const tokens = notes.replace(/[[<]/g, ' ').replace(/[\]>]/g, '').split(' ').filter(Boolean);
   if (tokens.length === 0 || tokens.length > 32 || !tokens.every((t) => TOKEN.test(t))) return null;
   const allowed = new Set(chords.flat().map((n) => n % 12));
   notes = notes.replace(NOTE_NAME, (name) => (allowed.has(pitchClass(name)) ? name : '~'));
   if ((notes.match(NOTE_NAME) ?? []).length < 2) return null;
+  try {
+    parsePattern(notes); // it must read, not just look right
+  } catch {
+    return null;
+  }
   const sound = m.sound === 'triangle' ? 'triangle' : 'sine';
   return {
     notes,

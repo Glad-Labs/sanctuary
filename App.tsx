@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet } from 'react-native';
 import { AudioContext, AudioManager } from 'react-native-audio-api';
 import { subscribeScore } from './src/arranger/client';
-import { createDrone, energyAt, localBalance, type Drone } from './src/audio/drone';
+import { createDrone, energyAt, type Drone } from './src/audio/drone';
 import { loadBuffers } from './src/audio/load';
-import { initMelody, melodyInfo, melodyLevel, playMelody, setMelodyLevel } from './src/melody';
 import { breathAt, type BreathPhase } from './src/breath';
 import { Breath } from './src/components/Breath';
 import { presenceAt, subscribePresence } from './src/presence';
@@ -45,7 +44,7 @@ export default function App() {
       .then((buffers) => {
         if (cancelled) return;
         droneRef.current = createDrone(ctx, ROOM, { buffers });
-        if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt, melodyLevel, melodyInfo };
+        if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt };
         if (ctx.state === 'suspended') {
           setWaitingForTouch(true);
           Animated.timing(hint, { toValue: 1, duration: 1500, delay: 400, useNativeDriver: NATIVE_ANIM }).start();
@@ -64,7 +63,6 @@ export default function App() {
 
   function begin() {
     droneRef.current?.start();
-    initMelody().catch(() => {});
     setStarted(true);
     setWaitingForTouch(false);
     Animated.timing(hint, { toValue: 0, duration: 600, useNativeDriver: NATIVE_ANIM }).start();
@@ -93,30 +91,14 @@ export default function App() {
       if (event === 'join') droneRef.current?.join(undefined, n);
     });
     const timer = setInterval(show, 5000);
-    // the melody follows the tide and the listener's hour, like the upper strings
-    // the melody follows the tide, the listener's hour, and the size of the room
-    const melodyLevelNow = () => {
-      const d = new Date();
-      const tide = droneRef.current?.score().tide;
-      const density = droneRef.current?.status().density ?? 0.5;
-      const present = droneRef.current?.melodyPresence() ?? 1;
-      return energyAt(Date.now() / 1000, tide) * localBalance(d.getHours() + d.getMinutes() / 60).top * (0.25 + 0.75 * density) * present;
-    };
-    let melodyTimer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
       droneRef.current?.setScore(score);
       if (__DEV__) console.log(`score: "${score.title}" (${score.source}) from ${new Date(score.validFrom * 1000).toISOString()}`);
-      if (melodyTimer) clearTimeout(melodyTimer);
-      const wait = Math.max(0, score.validFrom * 1000 - Date.now());
-      melodyTimer = setTimeout(() => playMelody(score.melody, melodyLevelNow()).catch(() => {}), wait);
     });
-    const levelTimer = setInterval(() => setMelodyLevel(melodyLevelNow()), 15_000);
     return () => {
       unsubscribe();
       unsubscribeScore();
       clearInterval(timer);
-      clearInterval(levelTimer);
-      if (melodyTimer) clearTimeout(melodyTimer);
     };
   }, [started]);
 

@@ -68,13 +68,14 @@ Three writers, in order of preference:
 3. **The app itself**, when the server is unreachable: it runs the same
    composer on a ten-minute grid, so offline devices still agree.
 
-The score also carries a **melody**: a sparse line in Strudel mini-notation
-(lowercase note names with octave and `~` rests), played by Strudel in the
-web build above the strings and aligned to the wall clock so every device is
-at the same point of the line. The arranger never hands the app code, only
-notes and rests; `sanitizeMelody()` rejects anything else and turns any note
-outside the score's voicings into a rest. Strudel is Web Audio only, so the
-native build plays without the melody for now.
+The score also carries a **melody**: a sparse line in a small notation
+(note names with octave, `~` rests, `[]` to subdivide, `<>` to alternate
+between cycles, `@n`, `*n`, `!`), played by the engine itself with the flute
+or a violin on the shared clock, so every device plays the same note at the
+same moment, on the web and native alike. The arranger never hands the app
+code, only notes and rests; `sanitizeMelody()` rejects anything else, turns
+any note outside the score's voicings into a rest, and checks the pattern
+reads (`src/audio/pattern.ts`).
 
 Run the arranger on the same machine as the dev server. With a local model
 through Ollama (the default when no Anthropic key is set):
@@ -131,11 +132,18 @@ Haptics do not work on the web and audio stops when the screen locks. Those
 need the native build below.
 
 Phone, which is the real thing. The audio engine is a native module, so
-Expo Go will not work. Build a development client:
+Expo Go will not work. Build a development client. On this machine a JDK
+and the Android SDK are installed under the home directory; load them,
+plug in a phone with USB debugging on, and build:
+
+```bash
+source scripts/android-env.sh && npx expo run:android
+```
+
+iOS needs a Mac or an EAS cloud build:
 
 ```bash
 npx expo run:ios
-npx expo run:android
 ```
 
 Background audio and the media-playback foreground service are configured
@@ -155,7 +163,8 @@ npx tsx scripts/render.ts 48 drone.wav
 
 `node scripts/manifest.mjs` regenerates the sample manifest after adding
 files to `assets/samples`; `node scripts/pitch.mjs file.wav` estimates a
-recording's fundamental.
+recording's fundamental; `node scripts/onsets.mjs file.mp3` counts the
+strikes inside a sample.
 
 In development the audio graph is exposed as `globalThis.__sanctuary`
 (`ctx`, `drone`). `drone.level()` returns the RMS of what is reaching the

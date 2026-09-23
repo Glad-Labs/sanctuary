@@ -43,6 +43,7 @@ async function main() {
     if (Math.abs(s - 15) < 0.01 || Math.abs(s - 40) < 0.01) for (let i = 0; i < 4; i++) drone.join(s);
   }
 
+  console.log(`melody notes scheduled: ${drone.status().melodyNotes}`);
   const rendered = await ctx.startRendering();
   const L = rendered.getChannelData(0);
   const R = rendered.getChannelData(1);
