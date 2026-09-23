@@ -45,7 +45,7 @@ export default function App() {
       .then((buffers) => {
         if (cancelled) return;
         if (__DEV__) console.log(`sanctuary: ${buffers.size} samples decoded, audio context ${ctx.state}, sample rate ${ctx.sampleRate}`);
-        droneRef.current = createDrone(ctx, ROOM, { buffers });
+        droneRef.current = createDrone(ctx, ROOM, { buffers, native: Platform.OS !== 'web' });
         if (__DEV__) console.log('sanctuary: engine built');
         if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt };
         if (ctx.state === 'suspended' && Platform.OS !== 'web') {

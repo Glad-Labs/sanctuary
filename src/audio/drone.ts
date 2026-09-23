@@ -10,7 +10,6 @@
 // Everything time-varying is a function of wall-clock seconds (`wall`) and is
 // scheduled at an audio-context time (`now`), so the same code renders offline.
 
-import { Platform } from 'react-native';
 import type {
   AnalyserNode,
   AudioBuffer,
@@ -84,6 +83,7 @@ const BOWL_SLOT_S = 30;
 const PERIOD_S = 9; // a new instance of each voice every PERIOD_S, crossfaded over FADE_S
 const FADE_S = 4;
 const MASTER = 1.0;
+const MAKEUP = 4.5; // about +13 dB, before the soft limiter
 const FADE_IN_S = 14;
 // ---- helpers ----------------------------------------------------------------
 
@@ -167,6 +167,8 @@ export interface DroneOptions {
   autoTick?: boolean;
   /** The listener's local hour, for the balance envelope. Defaults to this device's clock. */
   localHour?: (wall: number) => number;
+  /** True on a phone: a lighter hall, no level meter, no per-voice panning. */
+  native?: boolean;
 }
 
 export interface Drone {
@@ -220,7 +222,22 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   // master ── analyser
   const master = ctx.createGain();
   master.gain.value = 0;
-  master.connect(ctx.destination);
+  // Loudness. The mix is gentle by design, which left it nearly inaudible on
+  // a phone speaker. Makeup gain lifts it about ten decibels into a soft
+  // limiter (a tanh curve), so the loudest moments round off instead of
+  // clipping and the quiet ones simply get louder.
+  const makeup = ctx.createGain();
+  makeup.gain.value = MAKEUP;
+  const limiter = ctx.createWaveShaper();
+  const curve = new Float32Array(4096);
+  for (let i = 0; i < curve.length; i++) {
+    const x = (i / (curve.length - 1)) * 2 - 1;
+    curve[i] = Math.tanh(x * 1.4) / Math.tanh(1.4);
+  }
+  limiter.curve = curve;
+  master.connect(makeup);
+  makeup.connect(limiter);
+  limiter.connect(ctx.destination);
   const tideGain = ctx.createGain();
   tideGain.gain.value = 0.55;
   tideGain.connect(master);
@@ -229,7 +246,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   breathGain.connect(tideGain);
   // the level meter is for the web build and tests; on a phone every node
   // costs audio-thread time, so native does without it
-  const NATIVE = Platform.OS !== 'web' && options.autoTick !== false;
+  const NATIVE = options.native === true;
 
   // Smoothly steer a parameter toward a target. Each call would add an
   // automation event that the audio thread must scan every sample, so the
@@ -262,7 +279,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   // (the sound chops), so native gets a light algorithmic hall instead: four
   // feedback delay lines through a darkening filter, cross-coupled.
   const reverbIn: GainNode = ctx.createGain();
-  if (Platform.OS === 'web' || options.autoTick === false) {
+  if (!NATIVE) {
     const conv = ctx.createConvolver();
     conv.buffer = impulseResponse(ctx, 6, seed + 11);
     conv.normalize = true;
