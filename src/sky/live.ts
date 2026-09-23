@@ -7,7 +7,7 @@ const SDO = 'https://sdo.gsfc.nasa.gov/assets/img/latest';
 const SVS_2026 = 'https://svs.gsfc.nasa.gov/vis/a000000/a005500/a005587/frames/730x730_1x1_30p';
 export const SUN_REFRESH_MS = 30 * 60 * 1000;
 /** Fraction of the frame the disc spans, so the disc can be scaled to the orb. */
-export const SDO_DISC = 0.926;
+export const SDO_DISC = 0.787; // measured: the limb's steepest brightness drop, both channels
 export const SVS_DISC = 0.918;
 
 export interface LiveSky {

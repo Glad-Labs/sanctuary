@@ -44,8 +44,8 @@ const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
 const mix = (a: string, b: string, t: number) => hex(rgb(a).map((v, i) => v + (rgb(b)[i] - v) * Math.min(1, Math.max(0, t))));
 const smooth = (x: number) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
 
-const SUN_LOW = { core: '#ff7a33', mid: '#e8541f', rim: '#7a1f0a', glow: '#ff8c3a', ground: '#1a0906' };
-const SUN_HIGH = { core: '#fff6d6', mid: '#ffcf6e', rim: '#c2731c', glow: '#ffd98c', ground: '#171008' };
+const SUN_LOW = { core: '#ff7a33', mid: '#e8541f', rim: '#7a1f0a', glow: '#ff8c3a', ground: '#2c0f08' };
+const SUN_HIGH = { core: '#fff6d6', mid: '#ffcf6e', rim: '#c2731c', glow: '#ffd98c', ground: '#2a1f0e' };
 const MOON = { core: '#f4f1e8', mid: '#c9cbd4', rim: '#7f8499', glow: '#b7c3ff', ground: '#07061b' };
 
 export function skyAt(hour: number): Sky {
@@ -186,17 +186,34 @@ function Frame({ id, size, disc, caption, hard, children }: { id: string; size: 
 // The photographed sun: the red chromosphere near the horizon, the gold
 // corona toward noon, crossfaded by its height where you are, with a tint on
 // top. Live from SDO when online, yesterday's frames when not.
+// The photographed sun. Its mask is made of its own light: the disc is
+// solid, and beyond the limb each pixel is as opaque as it is bright, so the
+// frame's black sky vanishes while prominences and corona still glow past
+// the edge. The caption is blacked out of the mask.
 function SunDisc({ size, sky, live, breathStyle }: { size: number; sky: Sky; live: LiveSky; breathStyle: ReturnType<typeof useAnimatedStyle> }) {
   const r = size / 2;
   const box = size / SDO_DISC;
+  const off = -(box - size) / 2;
   const high = Math.pow(sky.sun, 0.7);
   const low = 1 - high;
+  const hot = live.sunHot ? { uri: live.sunHot } : SUN_HOT;
+  const gold = live.sunGold ? { uri: live.sunGold } : SUN_GOLD;
   return (
     <>
-      <Frame id="sun" size={size} disc={SDO_DISC} caption>
-        <Image href={live.sunHot ? { uri: live.sunHot } : SUN_HOT} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
-        <Image href={live.sunGold ? { uri: live.sunGold } : SUN_GOLD} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" opacity={high} />
-      </Frame>
+      <Svg width={box} height={box} style={{ position: 'absolute', left: off, top: off }}>
+        <Defs>
+          <Mask id="sunLight" maskUnits="userSpaceOnUse" x={0} y={0} width={box} height={box}>
+            <Image href={hot} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+            <Image href={gold} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" opacity={high} />
+            <Circle cx={box / 2} cy={box / 2} r={r + 1} fill="#ffffff" />
+            <Rect x="0" y={box * 0.94} width={box * 0.6} height={box * 0.06} fill="#000000" />
+          </Mask>
+        </Defs>
+        <G mask="url(#sunLight)">
+          <Image href={hot} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+          <Image href={gold} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" opacity={high} />
+        </G>
+      </Svg>
       <SunVideo size={size} disc={SDO_DISC} high={high} nowMs={live.at ?? 0} />
       <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
         <Circle cx={r} cy={r} r={r} fill={low > 0.5 ? '#ff2a00' : '#fff1bd'} fillOpacity={low > 0.5 ? 0.1 + 0.3 * (low - 0.5) : 0.22 * (1 - low * 2)} />

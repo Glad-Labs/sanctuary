@@ -37,12 +37,11 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
   const crop = 0.94; // show the middle 94%: keeps the ragged limb, loses NASA's caption
   const box = video * crop;
   const inset = -(video - box) / 2;
-  // The mask is opaque out to the disc's edge and fades over the last sliver
-  // beyond it, so the limb stays bright, prominences show, and the frame's
-  // black corners never do.
-  const edge = Math.round((disc / crop) * 100) - 1;
-  // closest-side: 100% is the box's half-width, not its corner
-  const mask = `radial-gradient(circle closest-side at center, #000 0%, #000 ${edge}%, transparent 100%)`;
+  // The movie is composited with a screen blend, so its black sky adds
+  // nothing to the ground behind it and only the sun's own light shows:
+  // prominences and corona glow past the limb with no edge. A soft circular
+  // mask still removes the frame's corners and caption.
+  const mask = `radial-gradient(circle closest-side at center, #000 0%, #000 88%, transparent 100%)`;
   const style: React.CSSProperties = {
     position: 'absolute',
     left: -(box - size) / 2,
@@ -52,6 +51,7 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
     overflow: 'hidden',
     WebkitMaskImage: mask,
     maskImage: mask,
+    mixBlendMode: 'screen',
     pointerEvents: 'none',
   };
   const layer = (uri: string, opacity: number, ref: React.RefObject<HTMLVideoElement | null>): React.ReactElement =>
