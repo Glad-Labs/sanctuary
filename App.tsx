@@ -43,9 +43,14 @@ export default function App() {
     loadBuffers(ctx.sampleRate)
       .then((buffers) => {
         if (cancelled) return;
+        if (__DEV__) console.log(`sanctuary: ${buffers.size} samples decoded, audio context ${ctx.state}, sample rate ${ctx.sampleRate}`);
         droneRef.current = createDrone(ctx, ROOM, { buffers });
+        if (__DEV__) console.log('sanctuary: engine built');
         if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt };
-        if (ctx.state === 'suspended') {
+        if (ctx.state === 'suspended' && Platform.OS !== 'web') {
+          // native needs no gesture; the context simply starts suspended
+          ctx.resume().then(begin, begin);
+        } else if (ctx.state === 'suspended') {
           setWaitingForTouch(true);
           Animated.timing(hint, { toValue: 1, duration: 1500, delay: 400, useNativeDriver: NATIVE_ANIM }).start();
         } else {
@@ -62,6 +67,7 @@ export default function App() {
   }, []);
 
   function begin() {
+    if (__DEV__) console.log('sanctuary: samples ready, beginning');
     droneRef.current?.start();
     setStarted(true);
     setWaitingForTouch(false);
