@@ -4,7 +4,6 @@ import Animated, {
   useAnimatedStyle,
   useFrameCallback,
   useSharedValue,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import Svg, { Circle, ClipPath, Defs, G, Image, Mask, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
@@ -19,7 +18,7 @@ const SUN_HOT = require('../../assets/sky/sun-hot.jpg');
 const SUN_GOLD = require('../../assets/sky/sun-gold.jpg');
 const MOON_TEXTURE = require('../../assets/sky/moon.jpg');
 import { moonAt } from '../arranger/inputs';
-import { breathAt } from '../breath';
+import { breathAt, CYCLE_MS } from '../breath';
 
 const DOTS = 28;
 
@@ -157,35 +156,45 @@ function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky })
 }
 
 // The moon over the last two days, as a slow time-lapse of NASA's hourly
-// frames: it librates and the terminator creeps. Plays forward and back so it
-// never jumps. Two layers crossfade so each step is a dissolve, not a cut.
-function MoonLapse({ size, frames }: { size: number; frames: string[] }) {
+// frames: it librates and the terminator creeps. Every step is one breath.
+// The next frame fades in as you inhale and holds through the exhale, and
+// the sequence plays forward then back so it never jumps.
+function lapseIndex(cycle: number, n: number): number {
+  const span = 2 * n - 2;
+  const m = ((cycle % span) + span) % span;
+  return m < n ? m : span - m;
+}
+function MoonLapse({ size, frames, clock }: { size: number; frames: string[]; clock: SharedValue<number> }) {
   const box = size / SVS_DISC;
-  const [pair, setPair] = useState<{ a: string; b: string; showB: boolean }>({ a: frames[frames.length - 1], b: frames[frames.length - 1], showB: false });
-  const fade = useSharedValue(0);
+  const n = frames.length;
+  const at = (cycle: number) => frames[lapseIndex(cycle, n)];
+  const [pair, setPair] = useState(() => {
+    const k = Math.floor(Date.now() / CYCLE_MS);
+    return { a: at(k), b: at(k + 1) };
+  });
   useEffect(() => {
-    if (frames.length < 2) return;
-    let i = frames.length - 1;
-    let dir = -1;
-    let showB = false;
+    let last = Math.floor(Date.now() / CYCLE_MS);
     const timer = setInterval(() => {
-      i += dir;
-      if (i <= 0 || i >= frames.length - 1) dir = -dir;
-      showB = !showB;
-      setPair((p) => (showB ? { a: p.a, b: frames[i], showB } : { a: frames[i], b: p.b, showB }));
-      fade.value = withTiming(showB ? 1 : 0, { duration: 1800 });
-    }, 2500);
+      const k = Math.floor(Date.now() / CYCLE_MS);
+      if (k !== last) {
+        last = k;
+        setPair({ a: at(k), b: at(k + 1) });
+      }
+    }, 200);
     return () => clearInterval(timer);
-  }, [frames, fade]);
-  const aStyle = useAnimatedStyle(() => ({ opacity: 1 - fade.value }));
-  const bStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frames]);
+  const bStyle = useAnimatedStyle(() => {
+    const b = breathAt(clock.value);
+    return { opacity: b.phase === 'in' ? b.fill : 1 };
+  });
   return (
     <>
-      <Animated.View style={[StyleSheet.absoluteFill, aStyle]}>
+      <View style={StyleSheet.absoluteFill}>
         <Frame id="moonA" size={size} disc={SVS_DISC}>
           <Image href={{ uri: pair.a }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
         </Frame>
-      </Animated.View>
+      </View>
       <Animated.View style={[StyleSheet.absoluteFill, bStyle]}>
         <Frame id="moonB" size={size} disc={SVS_DISC}>
           <Image href={{ uri: pair.b }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
@@ -199,9 +208,9 @@ function MoonLapse({ size, frames }: { size: number; frames: string[] }) {
 // libration, nothing drawn. Offline, the bundled full moon with tonight's
 // phase drawn as a night side, three times with the terminator nudged so its
 // edge is soft, and a little earthshine left showing.
-function MoonDisc({ size, phase, live }: { size: number; phase: number; live: LiveSky }) {
+function MoonDisc({ size, phase, live, clock }: { size: number; phase: number; live: LiveSky; clock: SharedValue<number> }) {
   const r = size / 2;
-  if (live.moonLapse && live.moonLapse.length >= 2) return <MoonLapse size={size} frames={live.moonLapse} />;
+  if (live.moonLapse && live.moonLapse.length >= 2) return <MoonLapse size={size} frames={live.moonLapse} clock={clock} />;
   if (live.moon) {
     const box = size / SVS_DISC;
     return (
@@ -339,7 +348,7 @@ export function Breath({ visible, density }: { visible: boolean; density: number
         )}
         {moonOpacity > 0 && (
           <View style={[StyleSheet.absoluteFill, styles.body, { opacity: moonOpacity }]}>
-            <MoonDisc size={size} phase={phase} live={live} />
+            <MoonDisc size={size} phase={phase} live={live} clock={clock} />
           </View>
         )}
       </Animated.View>
