@@ -94,10 +94,12 @@ export default function App() {
     });
     const timer = setInterval(show, 5000);
     // the melody follows the tide and the listener's hour, like the upper strings
+    // the melody follows the tide, the listener's hour, and the size of the room
     const melodyLevelNow = () => {
       const d = new Date();
       const tide = droneRef.current?.score().tide;
-      return energyAt(Date.now() / 1000, tide) * localBalance(d.getHours() + d.getMinutes() / 60).top;
+      const density = droneRef.current?.status().density ?? 0.5;
+      return energyAt(Date.now() / 1000, tide) * localBalance(d.getHours() + d.getMinutes() / 60).top * (0.25 + 0.75 * density);
     };
     let melodyTimer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {

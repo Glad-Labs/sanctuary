@@ -380,15 +380,17 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       const lfo = 0.8 + 0.2 * Math.sin((TAU * wall) / slotLfo[s].period + slotLfo[s].phase);
       const presence = clamp01(voicesNow - s); // the newest voice fades in with the tide
       const seat = s >= 2 ? here.top : 1; // viola and above soften at your night
-      layer.gain.gain.setTargetAtTime(ROLES[s].level * lfo * presence * seat, now, 6);
+      const crowd = s >= 3 ? 0.7 + 0.6 * density : 1; // violins and flute come forward as the room fills
+      layer.gain.gain.setTargetAtTime(ROLES[s].level * lfo * presence * seat * crowd, now, 6);
     });
-    const warmth = (600 + 1800 * sc.warmth) * here.warmth;
+    // a full room is brighter and more open; an empty one is close and dark
+    const warmth = (600 + 1800 * sc.warmth) * here.warmth * (0.55 + 0.75 * density);
     padFilter.frequency.setTargetAtTime(warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
     // a full room is a little louder than an empty one
-    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.72 + 0.28 * density), now, 8);
+    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.5 + 0.5 * density), now, 8);
 
     // textures: shimmer that only appears as the room fills, near the peak
-    const shimmer = (0.01 + 0.07 * clamp01((density - 0.4) / 0.6)) * energy * (0.3 + 1.4 * sc.shimmer);
+    const shimmer = (0.005 + 0.16 * clamp01((density - 0.25) / 0.75)) * energy * (0.3 + 1.4 * sc.shimmer);
     last = { ...last, voicesNow, energy, shimmer };
     textures.forEach((layer, i) => {
       advance(layer, wall, now, true);
@@ -399,7 +401,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const { fill } = breathAt(wall * 1000);
     advance(sea, wall, now, true);
     // the sea is what remains when the tide is out
-    sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea, now, 1.0);
+    sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
     advance(air, wall, now, true);
     air.gain.gain.setTargetAtTime(0.025, now, 4);
     breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
