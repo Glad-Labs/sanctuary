@@ -38,7 +38,7 @@ export function moonUri(nowMs: number): string | null {
 }
 
 /** The last `count` frames, `stepHours` apart, ending at this hour: a time-lapse of the moon. */
-export function moonLapseUris(nowMs: number, count = 24, stepHours = 2): string[] {
+export function moonLapseUris(nowMs: number, count = 24, stepHours = 1): string[] {
   if (nowMs < YEAR_START || nowMs >= YEAR_END) return [];
   const last = Math.floor((nowMs - YEAR_START) / 3_600_000) + 1;
   const frames: string[] = [];

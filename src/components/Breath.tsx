@@ -130,7 +130,7 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
       y = (y / Math.max(1, dist)) * keepOut;
     }
     return {
-      opacity: shown * (0.12 + 0.18 * breath + 0.6 * own) * (0.55 + 0.45 * energy.value),
+      opacity: shown * (0.6 + 0.12 * breath + 0.28 * own) * (0.8 + 0.2 * energy.value),
       transform: [{ translateX: x }, { translateY: y }, { scale: grow }],
     };
   });
@@ -139,8 +139,9 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
       <Svg width={d} height={d}>
         <Defs>
           <RadialGradient id={`dot${index}`} cx="50%" cy="50%" r="50%">
-            <Stop offset="0" stopColor="#ffffff" stopOpacity="0.95" />
-            <Stop offset="0.35" stopColor={colour} stopOpacity="0.8" />
+            <Stop offset="0" stopColor="#ffffff" stopOpacity="1" />
+            <Stop offset="0.45" stopColor="#ffffff" stopOpacity="0.95" />
+            <Stop offset="0.7" stopColor={colour} stopOpacity="0.75" />
             <Stop offset="1" stopColor={colour} stopOpacity="0" />
           </RadialGradient>
         </Defs>
@@ -154,15 +155,20 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
 // A whole NASA frame, scaled so its disc matches the orb, shown through a
 // soft radial mask: the limb keeps its real ragged edge (prominences, loops,
 // mountains) while the frame's corners and caption vanish.
-function Frame({ id, size, disc, caption, children }: { id: string; size: number; disc: number; caption?: boolean; children: React.ReactNode }) {
+function Frame({ id, size, disc, caption, hard, children }: { id: string; size: number; disc: number; caption?: boolean; hard?: boolean; children: React.ReactNode }) {
   const box = size / disc;
   const off = -(box - size) / 2;
+  // soft: the limb keeps whatever stands off it (prominences, loops) and the
+  // frame's corners fade away; hard: cut exactly at the limb, for the moon,
+  // so none of the frame's black sky shows around it
+  const fadeFrom = hard ? disc - 0.004 : Math.min(0.99, disc + 0.012);
+  const fadeTo = hard ? disc + 0.006 : 1;
   return (
     <Svg width={box} height={box} style={{ position: 'absolute', left: off, top: off }}>
       <Defs>
         <RadialGradient id={`${id}Fade`} cx="50%" cy="50%" r="50%">
-          <Stop offset={String(Math.min(0.99, disc + 0.012))} stopColor="#ffffff" stopOpacity="1" />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          <Stop offset={String(fadeFrom)} stopColor="#ffffff" stopOpacity="1" />
+          <Stop offset={String(fadeTo)} stopColor="#ffffff" stopOpacity="0" />
         </RadialGradient>
         <Mask id={`${id}Mask`}>
           <Rect x="0" y="0" width={box} height={box} fill={`url(#${id}Fade)`} />
@@ -223,37 +229,64 @@ function MoonLapse({ size, frames, clock }: { size: number; frames: string[]; cl
   const at = (cycle: number) => frames[lapseIndex(cycle, n)];
   const [pair, setPair] = useState(() => {
     const k = Math.floor(Date.now() / CYCLE_MS);
-    return { a: at(k), b: at(k + 1) };
+    return { cycle: k, a: at(k), b: at(k + 1) };
   });
+  // which cycle the pair belongs to, so the top frame keeps showing until the
+  // bottom one has actually been swapped (no flash of the old frame)
+  const pairCycle = useSharedValue(pair.cycle);
+  useEffect(() => {
+    pairCycle.value = pair.cycle;
+  }, [pair.cycle, pairCycle]);
   useEffect(() => {
     let last = Math.floor(Date.now() / CYCLE_MS);
     const timer = setInterval(() => {
       const k = Math.floor(Date.now() / CYCLE_MS);
       if (k !== last) {
         last = k;
-        setPair({ a: at(k), b: at(k + 1) });
+        setPair({ cycle: k, a: at(k), b: at(k + 1) });
       }
-    }, 200);
+    }, 100);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frames]);
   const bStyle = useAnimatedStyle(() => {
+    const k = Math.floor(clock.value / CYCLE_MS);
+    if (k !== pairCycle.value) return { opacity: 1 }; // hold until the swap lands
     const b = breathAt(clock.value);
     return { opacity: b.phase === 'in' ? b.fill : 1 };
   });
+  const r = size / 2;
   return (
     <>
       <View style={StyleSheet.absoluteFill}>
-        <Frame id="moonA" size={size} disc={SVS_DISC}>
+        <Frame id="moonA" size={size} disc={SVS_DISC} hard>
           <Image href={{ uri: pair.a }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
         </Frame>
       </View>
       <Animated.View style={[StyleSheet.absoluteFill, bStyle]}>
-        <Frame id="moonB" size={size} disc={SVS_DISC}>
+        <Frame id="moonB" size={size} disc={SVS_DISC} hard>
           <Image href={{ uri: pair.b }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
         </Frame>
       </Animated.View>
+      <MoonNight size={size} r={r} />
     </>
+  );
+}
+
+// A little night-sky light on the moon's dark side, so it reads as a sphere
+// in a blue night rather than a cut-out against black.
+function MoonNight({ size, r }: { size: number; r: number }) {
+  return (
+    <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
+      <Defs>
+        <RadialGradient id="moonNight" cx="50%" cy="50%" r="50%">
+          <Stop offset="0.6" stopColor="#7d8fe0" stopOpacity="0.14" />
+          <Stop offset="0.985" stopColor="#7d8fe0" stopOpacity="0.2" />
+          <Stop offset="1" stopColor="#7d8fe0" stopOpacity="0" />
+        </RadialGradient>
+      </Defs>
+      <Circle cx={r} cy={r} r={r} fill="url(#moonNight)" />
+    </Svg>
   );
 }
 
@@ -267,9 +300,12 @@ function MoonDisc({ size, phase, live, clock }: { size: number; phase: number; l
   if (live.moon) {
     const box = size / SVS_DISC;
     return (
-      <Frame id="moon" size={size} disc={SVS_DISC}>
-        <Image href={{ uri: live.moon }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
-      </Frame>
+      <>
+        <Frame id="moon" size={size} disc={SVS_DISC} hard>
+          <Image href={{ uri: live.moon }} x={0} y={0} width={box} height={box} preserveAspectRatio="xMidYMid slice" />
+        </Frame>
+        <MoonNight size={size} r={r} />
+      </>
     );
   }
   const shifted = (d: number) => {
