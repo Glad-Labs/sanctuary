@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet } from 'react-native';
-import { AudioContext, AudioManager } from 'react-native-audio-api';
+import { AudioContext, AudioManager, PlaybackNotificationManager } from 'react-native-audio-api';
 import { subscribeScore } from './src/arranger/client';
 import { createDrone, energyAt, type Drone } from './src/audio/drone';
 import { loadBuffers } from './src/audio/load';
@@ -66,6 +66,7 @@ export default function App() {
       cancelled = true;
       stopTickRef.current?.();
       droneRef.current?.stop();
+      if (Platform.OS !== 'web') PlaybackNotificationManager.hide().catch(() => {});
       ctx.close().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,6 +75,17 @@ export default function App() {
   function begin() {
     if (__DEV__) console.log('sanctuary: samples ready, beginning');
     droneRef.current?.start();
+    if (Platform.OS !== 'web') {
+      // Android 17 mutes an app's audio a few seconds after it leaves the
+      // screen unless it runs a media-playback foreground service, and the
+      // service must start while the app is visible. The playback notification
+      // is that service (and the lock-screen card). Its only control is stop.
+      AudioManager.requestNotificationPermissions().catch(() => {});
+      PlaybackNotificationManager.show({ title: 'Sanctuary', artist: 'Breathing with the world', state: 'playing' }).catch((e) => console.warn('notification failed', e));
+      for (const control of ['play', 'pause', 'nextTrack', 'previousTrack', 'skipForward', 'skipBackward', 'seekTo'] as const) {
+        PlaybackNotificationManager.enableControl(control, false).catch(() => {});
+      }
+    }
     if (clockIsNative) {
       const drone = droneRef.current;
       const ctx = ctxRef.current;
@@ -114,6 +126,7 @@ export default function App() {
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
       droneRef.current?.setScore(score);
       if (__DEV__) console.log(`score: "${score.title}" (${score.source}) from ${new Date(score.validFrom * 1000).toISOString()}`);
+      if (Platform.OS !== 'web') PlaybackNotificationManager.show({ title: 'Sanctuary', artist: score.title, state: 'playing' }).catch(() => {});
     }, every);
     return () => {
       unsubscribe();
@@ -121,6 +134,17 @@ export default function App() {
       stopShow();
     };
   }, [started]);
+
+  // The notification's stop button ends the room.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = PlaybackNotificationManager.addEventListener('playbackNotificationStop', () => {
+      stopTickRef.current?.();
+      droneRef.current?.stop();
+      PlaybackNotificationManager.hide().catch(() => {});
+    });
+    return () => sub.remove();
+  }, []);
 
   // Breath: pulse the phone at each turn of the breath.
   useEffect(() => {

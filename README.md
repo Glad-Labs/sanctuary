@@ -129,6 +129,12 @@ Three things learned the hard way on a Pixel 9, all handled in the code:
   the score poll) now runs off a native 100 ms clock in `modules/pulse`,
   which keeps ticking with the screen off. Verify with
   `adb logcat | grep "diag ctx"` while the phone is locked.
+- **Android 17 mutes background audio without a foreground service.** About
+  five seconds after the app leaves the screen the system silences it, and
+  `adb shell dumpsys audio | grep AudioHardening` records the decision. The
+  audio library's playback notification is a media-playback foreground
+  service, so the app shows it the moment the room begins, while visible; it
+  is also the lock-screen card, with a single stop control.
 - **Haptics.** Every haptics library sends its pulses as touch feedback,
   which Android drops when the user has touch feedback switched off. The
   same module sends the breath as media vibration.
