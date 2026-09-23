@@ -27,9 +27,10 @@ afterward? Put it in front of twenty people with their eyes closed.
   voices are present, how much shimmer there is, how often bowls ring, and
   how many points of light orbit the sphere. Each arrival is a soft
   vibraphone ring.
-- **One shared breath** (`src/breath.ts`). Four seconds in, four out, phased
-  from the wall clock so the whole world inhales together. The sphere swells,
-  the sound swells, the phone pulses at each turn of the breath.
+- **One shared breath** (`src/breath.ts`). Five seconds in, five out, the
+  pace of a resting breath, with a natural pause at each end, phased from
+  the wall clock so the whole world inhales together. The orb swells, the
+  sea swells, the phone pulses at each turn of the breath.
 - **The sky is real, and live.** By day the orb is the sun as NASA's Solar
   Dynamics Observatory sees it right now, the red chromosphere near the
   horizon crossfading to the gold corona toward noon, its limb ragged with

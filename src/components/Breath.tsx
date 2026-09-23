@@ -65,21 +65,31 @@ export function moonShadowPath(r: number, phase: number): string {
 }
 
 // ---- points of light -------------------------------------------------------
+// Each point drifts on its own slow orbit and pulses to its own private
+// rhythm: two slow sines with periods that never line up, so no two points
+// breathe alike, over a faint share of the room's breath.
+function hash01(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
 function Dot({ index, clock, density, size, colour }: { index: number; clock: SharedValue<number>; density: SharedValue<number>; size: number; colour: string }) {
-  const angle0 = (index / DOTS) * Math.PI * 2 + (index % 5) * 0.37;
-  const period = 90 + (index % 7) * 17; // seconds per orbit
-  const radius = size * (0.7 + ((index * 7) % 10) / 22);
-  const dir = index % 2 === 0 ? 1 : -1;
-  const twinkle = 0.6 + (index % 3) * 0.2;
+  const angle0 = hash01(index) * Math.PI * 2;
+  const period = 240 + hash01(index + 50) * 300; // four to nine minutes per orbit
+  const radius = size * (0.68 + hash01(index + 100) * 0.42);
+  const dir = hash01(index + 150) < 0.5 ? 1 : -1;
+  const p1 = 6 + hash01(index + 200) * 10; // seconds
+  const p2 = 17 + hash01(index + 250) * 26;
+  const f1 = hash01(index + 300) * Math.PI * 2;
+  const f2 = hash01(index + 350) * Math.PI * 2;
   const style = useAnimatedStyle(() => {
     const t = clock.value / 1000;
     const shown = index < Math.round(DOTS * density.value) ? 1 : 0;
-    const a = angle0 + (dir * (t % period) * Math.PI * 2) / period;
+    const a = angle0 + (dir * t * Math.PI * 2) / period;
     const breath = breathAt(clock.value).fill;
-    const r = radius * (0.94 + 0.1 * breath);
-    const flicker = 0.75 + 0.25 * Math.sin(t * twinkle + index);
+    const own = (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p1 + f1)) * (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p2 + f2));
+    const r = radius * (0.97 + 0.04 * breath + 0.02 * own);
     return {
-      opacity: shown * (0.3 + 0.5 * breath) * flicker,
+      opacity: shown * (0.12 + 0.18 * breath + 0.6 * own),
       transform: [{ translateX: Math.cos(a) * r }, { translateY: Math.sin(a) * r }],
     };
   });
