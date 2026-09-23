@@ -212,6 +212,23 @@ plug in a phone with USB debugging on, and build:
 source scripts/android-env.sh && npx expo run:android
 ```
 
+To hand the app to someone else, build a signed release for 64-bit ARM
+only (a fraction of the size of the development build, which carries
+every architecture):
+
+```bash
+scripts/release.sh
+```
+
+It writes `dist/sanctuary-<version>.apk`, signed with the Glad Labs key.
+The key lives outside the repo: `~/.sanctuary/release.keystore` and
+`~/.sanctuary/keystore.env` (the passwords), created once with `keytool`
+and never committed. The same key must sign every future build or Android
+refuses the update, so back those two files up. The arranger address is
+baked in from `EXPO_PUBLIC_SCORE_URL` at build time, so a recipient must be
+on the Tailscale network for presence and the arranger; the room itself
+plays without them.
+
 iOS needs a Mac or an EAS cloud build:
 
 ```bash
