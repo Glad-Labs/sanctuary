@@ -39,7 +39,10 @@ export function moonAt(unixSeconds: number): RoomInputs['moon'] {
   return { phase, illumination, name };
 }
 
-export function roomInputs(nowMs: number = Date.now()): RoomInputs {
+/** Presence as measured: how many are here and the 24-bin histogram of their local hours. */
+export interface Presence { count: number; hours: number[] }
+
+export function roomInputs(nowMs: number = Date.now(), presence?: Presence): RoomInputs {
   const d = new Date(nowMs);
   const at = Math.floor(nowMs / 1000);
   const yearStart = Date.UTC(d.getUTCFullYear(), 0, 0);
@@ -54,7 +57,7 @@ export function roomInputs(nowMs: number = Date.now()): RoomInputs {
     dawnCity: cityAtDawn(d),
     subsolarLongitude: Math.round(subsolarLongitude(d)),
     moon: moonAt(at),
-    listeners: presenceAt(nowMs),
-    room: roomHours(presenceHoursAt(nowMs)),
+    listeners: presence ? presence.count : presenceAt(nowMs),
+    room: roomHours(presence ? presence.hours : presenceHoursAt(nowMs)),
   };
 }

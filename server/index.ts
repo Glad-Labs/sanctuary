@@ -8,6 +8,8 @@
 // Without a key it serves the composer's draft, which is the same score the
 // app composes for itself when the server is unreachable.
 import Anthropic from '@anthropic-ai/sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { randomBytes } from 'node:crypto';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 import { appendFileSync } from 'node:fs';
@@ -23,6 +25,40 @@ const MODEL = process.env.ARRANGER_MODEL ?? 'claude-opus-5';
 const ROOM = process.env.ROOM ?? 'rest';
 const LOG = process.env.ARRANGER_LOG ?? 'server/scores.jsonl';
 const hasCredential = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+// LiveKit: presence is who is in the room. The server mints join tokens for
+// listeners (subscribe only, carrying their UTC offset as metadata) and reads
+// the participant list for the arranger's inputs. Unset, the simulated room is used.
+const LIVEKIT_URL = process.env.LIVEKIT_URL ?? 'ws://100.111.15.72:7880';
+const LIVEKIT_KEY = process.env.LIVEKIT_API_KEY ?? 'sanctuary-dev';
+const LIVEKIT_SECRET = process.env.LIVEKIT_API_SECRET ?? 'sanctuary-dev-secret-change-before-anyone-else-uses-this';
+const livekit = process.env.LIVEKIT_DISABLED ? null : new RoomServiceClient(LIVEKIT_URL.replace(/^ws/, 'http'), LIVEKIT_KEY, LIVEKIT_SECRET);
+
+/** The real room: how many are here and what hour it is for each of them. */
+async function livePresence(room: string): Promise<{ count: number; hours: number[] } | null> {
+  if (!livekit) return null;
+  try {
+    const participants = await livekit.listParticipants(room);
+    const hours = new Array<number>(24).fill(0);
+    const nowUtcHour = (Date.now() / 3_600_000) % 24;
+    for (const p of participants) {
+      let tz = 0;
+      try { tz = Number(JSON.parse(p.metadata || '{}').tz) || 0; } catch {}
+      const local = (((nowUtcHour + tz / 60) % 24) + 24) % 24;
+      hours[Math.floor(local)] += 1;
+    }
+    return { count: participants.length, hours };
+  } catch (e) {
+    if (!(e instanceof Error && /not found/i.test(e.message))) console.warn('livekit presence failed:', e instanceof Error ? e.message : e);
+    return { count: 0, hours: new Array<number>(24).fill(0) }; // no such room yet: empty
+  }
+}
+
+async function joinToken(room: string, tz: number): Promise<string> {
+  const identity = `listener-${randomBytes(6).toString('hex')}`;
+  const at = new AccessToken(LIVEKIT_KEY, LIVEKIT_SECRET, { identity, metadata: JSON.stringify({ tz }), ttl: '12h' });
+  at.addGrant({ roomJoin: true, room, canPublish: false, canSubscribe: true, canPublishData: false });
+  return at.toJwt();
+}
 // Backends: 'anthropic' (Claude), 'ollama' (a local model on this machine), 'none' (composer only).
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen3.6:27b';
@@ -108,7 +144,8 @@ async function refine(inputs: RoomInputs, draft: CleanScore): Promise<{ body: Cl
 }
 
 async function arrange() {
-  const inputs = roomInputs();
+  const live = await livePresence(ROOM);
+  const inputs = roomInputs(Date.now(), live ?? undefined);
   const draft = compose(inputs);
   const { body, source, usage, error } = await refine(inputs, draft);
   const validFrom = Math.floor(Date.now() / 1000) + LEAD_S;
@@ -121,9 +158,24 @@ async function arrange() {
   console.log(`[${new Date().toISOString()}] "${score.title}" (${source}${error ? `, ${error}` : ''}) applies ${new Date(validFrom * 1000).toISOString()}${score.melody ? `  melody "${score.melody.notes}"` : ''}`);
 }
 
-createServer((req, res) => {
+createServer(async (req, res) => {
   const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
-  if (req.url?.startsWith('/score')) {
+  if (req.url?.startsWith('/token')) {
+    const q = new URL(req.url, 'http://x').searchParams;
+    const tz = Math.max(-840, Math.min(840, Number(q.get('tz')) || 0));
+    const room = (q.get('room') ?? ROOM).replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || ROOM;
+    try {
+      const token = await joinToken(room, tz);
+      res.writeHead(200, headers);
+      res.end(JSON.stringify({ url: LIVEKIT_URL, token, room }));
+    } catch (e) {
+      res.writeHead(500, headers);
+      res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+    }
+  } else if (req.url?.startsWith('/presence')) {
+    res.writeHead(200, headers);
+    res.end(JSON.stringify(await livePresence(ROOM)));
+  } else if (req.url?.startsWith('/score')) {
     res.writeHead(200, headers);
     res.end(JSON.stringify({ score: current, now: Math.floor(Date.now() / 1000), model: MODEL_NAME }));
   } else if (req.url?.startsWith('/history')) {

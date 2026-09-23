@@ -12,11 +12,21 @@ import { presenceAt, subscribePresence } from './src/presence';
 import { clockIsNative, every, pulse } from './modules/pulse';
 
 const ROOM = 'rest';
+if (Platform.OS !== 'web') {
+  // LiveKit needs WebRTC globals on native; harmless if the room is never joined
+  try {
+    require('@livekit/react-native').registerGlobals();
+  } catch (e) {
+    console.warn('livekit globals', e);
+  }
+}
 const NATIVE_ANIM = Platform.OS !== 'web';
 // Where the shared score comes from. In the browser, default to the arranger on the same host.
 const SCORE_URL =
   process.env.EXPO_PUBLIC_SCORE_URL ??
   (Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8091/score` : undefined);
+// The real room lives on LiveKit; the arranger mints the join token.
+const TOKEN_URL = SCORE_URL ? `${SCORE_URL.replace(/\/score$/, '')}/token?room=${ROOM}` : undefined;
 
 export default function App() {
   const ctxRef = useRef<AudioContext | null>(null);
@@ -121,7 +131,7 @@ export default function App() {
       show();
       droneRef.current?.setListeners(n);
       if (event === 'join') droneRef.current?.join(undefined, n);
-    }, every);
+    }, every, TOKEN_URL ? { tokenUrl: TOKEN_URL } : undefined);
     const stopShow = every(show, 5000);
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
       droneRef.current?.setScore(score);

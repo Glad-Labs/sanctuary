@@ -111,12 +111,32 @@ that size: voices, shimmer, bowls, and the points of light all follow.
 `__sanctuary.drone.status()` in a dev console shows what the engine is
 doing with it. Offline, `LISTENERS=40 npx tsx scripts/render.ts 30 out.wav`.
 
-## What is stubbed
+## Presence: the real room
 
-- `src/presence.ts` simulates the listener count. It is a pure function of
-  time, so every device shows the same number and hears the same arrivals
-  together. Swap its body for a Supabase Realtime presence channel; the
-  callback contract stays the same.
+Presence is a LiveKit room, one per Sanctuary room, self-hosted on this
+machine in Docker and reached over Tailscale. Every device joins as a silent
+participant (subscribe only, no microphone) carrying its UTC offset as
+metadata, so the count is real and the arranger gets a true histogram of
+the listeners' local hours. The same connection will carry a performer's
+audio later.
+
+```bash
+docker run -d --name sanctuary-livekit --restart unless-stopped \
+  -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
+  -v "$PWD/server/livekit.yaml:/etc/livekit.yaml:ro" \
+  livekit/livekit-server:latest --config /etc/livekit.yaml
+```
+
+The arranger mints join tokens (`GET /token?room=rest&tz=<minutes east of
+UTC>`) and reports the room (`GET /presence`). `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` configure it; the defaults match
+`server/livekit.yaml`, which holds development keys for a private network
+and must change before anyone else uses this. The arranger and LiveKit are plain HTTP and WebSocket on the private
+network, so the Android build allows cleartext traffic (`expo-build-
+properties` in `app.json`); a public deployment puts both behind TLS and
+drops that. Without a token endpoint, or
+when the room is unreachable, the app falls back to the simulated presence
+in `src/presence.ts`, and `?people=N` overrides either.
 
 ## On the phone
 

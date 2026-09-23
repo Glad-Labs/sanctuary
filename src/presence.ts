@@ -72,13 +72,58 @@ const everyDefault: Every = (fn, ms) => {
   return () => clearInterval(id);
 };
 
-export function subscribePresence(listener: PresenceListener, every: Every = everyDefault): () => void {
-  const now = () => presenceOverride() ?? presenceAt(Date.now());
+/** Where to get a LiveKit join token: the arranger's /token endpoint. */
+export interface LiveOptions { tokenUrl: string }
+
+/**
+ * Presence. With `live`, the count is the real LiveKit room: this device
+ * joins as a silent participant carrying its UTC offset, and every arrival
+ * and departure arrives as an event. Without it, or if the connection fails,
+ * the simulated room stands in. `?people=N` overrides either, for trying sizes.
+ */
+export function subscribePresence(listener: PresenceListener, every: Every = everyDefault, live?: LiveOptions): () => void {
+  let liveCount: number | null = null;
+  const now = () => presenceOverride() ?? liveCount ?? presenceAt(Date.now());
   let last = now();
   listener(last);
-  return every(() => {
+  const stopPolling = every(() => {
     const next = now();
     if (next !== last) listener(next, next > last ? 'join' : 'leave');
     last = next;
   }, 1000);
+
+  let disconnect: (() => Promise<void>) | null = null;
+  let stopped = false;
+  if (live) {
+    connectLive(live.tokenUrl, (count) => {
+      liveCount = count;
+    })
+      .then((d) => {
+        if (stopped) d();
+        else disconnect = d;
+      })
+      .catch((e) => console.warn('presence: live room unavailable, simulating', e instanceof Error ? e.message : e));
+  }
+  return () => {
+    stopped = true;
+    stopPolling();
+    disconnect?.().catch(() => {});
+  };
+}
+
+async function connectLive(tokenUrl: string, onCount: (count: number) => void): Promise<() => Promise<void>> {
+  const { Room, RoomEvent } = await import('livekit-client');
+  const tz = -new Date().getTimezoneOffset(); // minutes east of UTC
+  const res = await fetch(`${tokenUrl}${tokenUrl.includes('?') ? '&' : '?'}tz=${tz}`);
+  if (!res.ok) throw new Error(`token ${res.status}`);
+  const { url, token } = (await res.json()) as { url: string; token: string };
+  const room = new Room();
+  const report = () => onCount(room.remoteParticipants.size + 1); // everyone else, plus this device
+  room.on(RoomEvent.ParticipantConnected, report);
+  room.on(RoomEvent.ParticipantDisconnected, report);
+  room.on(RoomEvent.Reconnected, report);
+  room.on(RoomEvent.Disconnected, () => onCount(0));
+  await room.connect(url, token, { autoSubscribe: true });
+  report();
+  return () => room.disconnect();
 }

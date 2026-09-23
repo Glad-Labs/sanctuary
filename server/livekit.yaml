@@ -1,0 +1,17 @@
+# LiveKit server for Sanctuary, self-hosted on Matt's PC and reached over
+# Tailscale. One LiveKit room per Sanctuary room; every listener joins as a
+# silent participant carrying its UTC offset, which is what presence is made
+# of. Development keys: this is a private network prototype.
+port: 7880
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+  node_ip: 100.111.15.72
+keys:
+  sanctuary-dev: sanctuary-dev-secret-change-before-anyone-else-uses-this
+logging:
+  level: info
+room:
+  auto_create: true
+  empty_timeout: 300
