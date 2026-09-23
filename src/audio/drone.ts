@@ -80,10 +80,15 @@ export function energyAt(wall: number, tide: CleanScore['tide'] = DEFAULT_SCORE.
   return tide.floor + (tide.peak - tide.floor) * shape;
 }
 const BOWL_SLOT_S = 30;
-const PERIOD_S = 9; // a new instance of each voice every PERIOD_S, crossfaded over FADE_S
-const FADE_S = 4;
+// A new instance of each voice every PERIOD_S, crossfaded over FADE_S. The
+// sustains are seamless loops, so an instance can last far longer than the
+// recording; long passes matter on a phone, where every source node created
+// reports its whole buffer as memory pressure to the JS engine and constant
+// churn stalls it in garbage collection.
+const PERIOD_S = 30;
+const FADE_S = 10;
 const MASTER = 1.0;
-const MAKEUP = 4.5; // about +13 dB, before the soft limiter
+const MAKEUP = 2.6; // about +8 dB; the mix peaks under half scale, so there is headroom
 const FADE_IN_S = 14;
 // ---- helpers ----------------------------------------------------------------
 
@@ -197,6 +202,8 @@ interface Layer {
   phase: number;
   gain: GainNode;
   lastK: number;
+  /** The recording is a seamless loop, so an instance may outlast it. */
+  loop: boolean;
   /** Which sample and pitch to use for instance `k` starting at `startWall`. */
   pickAt?: (startWall: number, k: number) => { id: string; rate: number } | undefined;
 }
@@ -223,21 +230,13 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   const master = ctx.createGain();
   master.gain.value = 0;
   // Loudness. The mix is gentle by design, which left it nearly inaudible on
-  // a phone speaker. Makeup gain lifts it about ten decibels into a soft
-  // limiter (a tanh curve), so the loudest moments round off instead of
-  // clipping and the quiet ones simply get louder.
+  // a phone speaker, so makeup gain lifts it about eight decibels. No limiter:
+  // the mix peaks well under half scale before makeup, so there is headroom,
+  // and a waveshaper on the phone gated the sound to bursts.
   const makeup = ctx.createGain();
   makeup.gain.value = MAKEUP;
-  const limiter = ctx.createWaveShaper();
-  const curve = new Float32Array(4096);
-  for (let i = 0; i < curve.length; i++) {
-    const x = (i / (curve.length - 1)) * 2 - 1;
-    curve[i] = Math.tanh(x * 1.4) / Math.tanh(1.4);
-  }
-  limiter.curve = curve;
   master.connect(makeup);
-  makeup.connect(limiter);
-  limiter.connect(ctx.destination);
+  makeup.connect(ctx.destination);
   const tideGain = ctx.createGain();
   tideGain.gain.value = 0.55;
   tideGain.connect(master);
@@ -248,16 +247,10 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   // costs audio-thread time, so native does without it
   const NATIVE = options.native === true;
 
-  // Smoothly steer a parameter toward a target. Each call would add an
-  // automation event that the audio thread must scan every sample, so the
-  // previous events are cancelled first and nothing is scheduled at all when
-  // the target has barely moved. Keeps the audio thread's work flat over hours.
-  const aimed = new Map<AudioParam, number>();
+  // Smoothly steer a parameter toward a target. Plain setTargetAtTime: an
+  // earlier version cancelled previous events first and skipped unchanged
+  // targets, and on the phone that gated the sound to silence with bursts.
   const aim = (param: AudioParam, target: number, now: number, tau: number) => {
-    const last = aimed.get(param);
-    if (last !== undefined && Math.abs(target - last) <= Math.max(0.004, Math.abs(last) * 0.015)) return;
-    aimed.set(param, target);
-    param.cancelScheduledValues(now);
     param.setTargetAtTime(target, now, tau);
   };
   const analyser: AnalyserNode | null = NATIVE ? null : ctx.createAnalyser();
@@ -362,7 +355,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let running = false;
   let ticker: ReturnType<typeof setInterval> | undefined;
 
-  function makeLayer(id: string, rate: number, period: number, fade: number, phase: number, dest: GainNode | BiquadFilterNode, pan: number): Layer {
+  function makeLayer(id: string, rate: number, period: number, fade: number, phase: number, dest: GainNode | BiquadFilterNode, pan: number, loop = true): Layer {
     const gain = ctx.createGain();
     gain.gain.value = 0;
     if (NATIVE) {
@@ -373,7 +366,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       gain.connect(panner);
       panner.connect(dest);
     }
-    return { id, rate, period, fade, phase, gain, lastK: -1 };
+    return { id, rate, period, fade, phase, gain, lastK: -1, loop };
   }
 
   // voice slots
@@ -396,11 +389,12 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
 
   // textures and beds
   const textures = [
-    makeLayer('cymbal_bow_1', 0.5, 9, 4, 0, padFilter, -0.6),
-    makeLayer('cymbal_bow_2', 0.75, 9, 4, 4.5, padFilter, 0.6),
+    makeLayer('cymbal_bow_1', 0.5, 30, 10, 0, padFilter, -0.6),
+    makeLayer('cymbal_bow_2', 0.75, 30, 10, 15, padFilter, 0.6),
   ];
-  const sea = makeLayer('ocean', 1, 22, 5, 0, bedFilter, 0);
-  const air = makeLayer('breeze', 1, 22, 5, 11, bedFilter, 0.2); // a breeze with birds, now and then
+  // the sea and the breeze are recordings, not loops: instances end within them
+  const sea = makeLayer('ocean', 1, 22, 5, 0, bedFilter, 0, false);
+  const air = makeLayer('breeze', 1, 22, 5, 11, bedFilter, 0.2, false); // a breeze with birds, now and then
 
   /** Schedule instance k of a layer; `at` is audio time, `offset` how far in (wall s) it already is. */
   function scheduleInstance(layer: Layer, k: number, startWall: number, at: number, offset: number) {
@@ -409,7 +403,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const buffer = buffers.get(choice.id);
     if (!buffer) return;
     const rate = choice.rate;
-    const dur = Math.min(layer.period + layer.fade, buffer.duration / rate - 0.05);
+    const dur = layer.loop ? layer.period + layer.fade : Math.min(layer.period + layer.fade, buffer.duration / rate - 0.05);
     if (offset >= dur) return;
     const fade = Math.min(layer.fade, dur / 2);
     const t0 = at - offset;
@@ -418,6 +412,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
 
     const src = ctx.createBufferSource();
     src.buffer = buffer;
+    src.loop = layer.loop;
     src.playbackRate.value = rate;
     const env = ctx.createGain();
     env.gain.setValueAtTime(envAt(offset), at);
@@ -429,6 +424,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     src.connect(env);
     env.connect(layer.gain);
     src.start(at, offset * rate, (dur - offset) * rate);
+    instancesStarted += 1;
   }
 
   /** Keep a layer's instance schedule running just ahead of `wall`. */
@@ -517,8 +513,21 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let bowls = 0;
   let melodyNotes = 0;
   const scheduledNotes = new Set<string>();
+  let instancesStarted = 0;
+
+  let lastDiag = 0;
+  let diagStart: { wall: number; ctx: number } | null = null;
 
   function tick(wall: number, now: number) {
+    // One status line every five seconds, kept in release builds: on a phone
+    // it is the only way to see that the clock and the scheduler are alive
+    // with the screen off (adb logcat, grep "diag ctx").
+    if (wall - lastDiag >= 5) {
+      lastDiag = wall;
+      if (!diagStart) diagStart = { wall, ctx: now };
+      const drift = (now - diagStart.ctx) - (wall - diagStart.wall);
+      console.warn(`diag ctx=${now.toFixed(2)} drift=${drift.toFixed(3)}s state=${ctx.state} started=${instancesStarted} voices=${last.voicesNow.toFixed(2)} energy=${last.energy.toFixed(2)} calm=${last.calm.toFixed(2)} master=${master.gain.value.toFixed(2)} tide=${tideGain.gain.value.toFixed(2)}`);
+    }
     if (pending && wall >= pending.validFrom) {
       current = pending;
       pending = null;
@@ -622,8 +631,15 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       master.gain.setValueAtTime(0, audioNow);
       master.gain.linearRampToValueAtTime(MASTER, audioNow + FADE_IN_S);
       if (autoTick) {
-        tick(Date.now() / 1000, ctx.currentTime);
-        ticker = setInterval(() => tick(Date.now() / 1000, ctx.currentTime), 200);
+        const safeTick = () => {
+          try {
+            tick(Date.now() / 1000, ctx.currentTime);
+          } catch (e) {
+            console.warn(`tick failed: ${e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e)}`);
+          }
+        };
+        safeTick();
+        ticker = setInterval(safeTick, 200);
       }
     },
     stop() {

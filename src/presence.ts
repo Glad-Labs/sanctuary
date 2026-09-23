@@ -66,14 +66,19 @@ export function presenceOverride(): number | null {
   return null;
 }
 
-export function subscribePresence(listener: PresenceListener): () => void {
+export type Every = (fn: () => void, ms: number) => () => void;
+const everyDefault: Every = (fn, ms) => {
+  const id = setInterval(fn, ms);
+  return () => clearInterval(id);
+};
+
+export function subscribePresence(listener: PresenceListener, every: Every = everyDefault): () => void {
   const now = () => presenceOverride() ?? presenceAt(Date.now());
   let last = now();
   listener(last);
-  const timer = setInterval(() => {
+  return every(() => {
     const next = now();
     if (next !== last) listener(next, next > last ? 'join' : 'leave');
     last = next;
   }, 1000);
-  return () => clearInterval(timer);
 }

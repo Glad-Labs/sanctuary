@@ -9,7 +9,7 @@ import { loadBuffers } from './src/audio/load';
 import { breathAt, type BreathPhase } from './src/breath';
 import { Breath } from './src/components/Breath';
 import { presenceAt, subscribePresence } from './src/presence';
-import { pulse } from './modules/pulse';
+import { clockIsNative, every, pulse } from './modules/pulse';
 
 const ROOM = 'rest';
 const NATIVE_ANIM = Platform.OS !== 'web';
@@ -21,6 +21,7 @@ const SCORE_URL =
 export default function App() {
   const ctxRef = useRef<AudioContext | null>(null);
   const droneRef = useRef<Drone | null>(null);
+  const stopTickRef = useRef<(() => void) | null>(null);
   const [room, setRoom] = useState({ people: 0, energy: 0 });
   const [waitingForTouch, setWaitingForTouch] = useState(false);
   const [started, setStarted] = useState(false);
@@ -45,7 +46,9 @@ export default function App() {
       .then((buffers) => {
         if (cancelled) return;
         if (__DEV__) console.log(`sanctuary: ${buffers.size} samples decoded, audio context ${ctx.state}, sample rate ${ctx.sampleRate}`);
-        droneRef.current = createDrone(ctx, ROOM, { buffers, native: Platform.OS !== 'web' });
+        // On Android the engine is driven by the native clock (see modules/pulse), which keeps
+        // ticking with the screen off; React Native's own timers stop when the activity pauses.
+        droneRef.current = createDrone(ctx, ROOM, { buffers, native: Platform.OS !== 'web', autoTick: !clockIsNative });
         if (__DEV__) console.log('sanctuary: engine built');
         if (__DEV__) (globalThis as any).__sanctuary = { ctx, drone: droneRef.current, presenceAt, breathAt };
         if (ctx.state === 'suspended' && Platform.OS !== 'web') {
@@ -61,6 +64,7 @@ export default function App() {
       .catch((e) => console.warn('samples failed to load', e));
     return () => {
       cancelled = true;
+      stopTickRef.current?.();
       droneRef.current?.stop();
       ctx.close().catch(() => {});
     };
@@ -70,6 +74,15 @@ export default function App() {
   function begin() {
     if (__DEV__) console.log('sanctuary: samples ready, beginning');
     droneRef.current?.start();
+    if (clockIsNative) {
+      const drone = droneRef.current;
+      const ctx = ctxRef.current;
+      if (drone && ctx) {
+        const tick = () => drone.tick(Date.now() / 1000, ctx.currentTime);
+        tick();
+        stopTickRef.current = every(tick, 200);
+      }
+    }
     setStarted(true);
     setWaitingForTouch(false);
     Animated.timing(hint, { toValue: 0, duration: 600, useNativeDriver: NATIVE_ANIM }).start();
@@ -96,16 +109,16 @@ export default function App() {
       show();
       droneRef.current?.setListeners(n);
       if (event === 'join') droneRef.current?.join(undefined, n);
-    });
-    const timer = setInterval(show, 5000);
+    }, every);
+    const stopShow = every(show, 5000);
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
       droneRef.current?.setScore(score);
       if (__DEV__) console.log(`score: "${score.title}" (${score.source}) from ${new Date(score.validFrom * 1000).toISOString()}`);
-    });
+    }, every);
     return () => {
       unsubscribe();
       unsubscribeScore();
-      clearInterval(timer);
+      stopShow();
     };
   }, [started]);
 
@@ -113,7 +126,7 @@ export default function App() {
   useEffect(() => {
     if (!started) return;
     let lastPhase: BreathPhase | null = null;
-    const timer = setInterval(() => {
+    const stop = every(() => {
       const b = breathAt(Date.now());
       if (b.phase !== lastPhase) {
         lastPhase = b.phase;
@@ -130,8 +143,9 @@ export default function App() {
         }
       }
     }, 100);
-    return () => clearInterval(timer);
+    return stop;
   }, [started]);
+
 
   return (
     <Pressable style={styles.screen} onPress={onTouch}>

@@ -118,6 +118,27 @@ doing with it. Offline, `LISTENERS=40 npx tsx scripts/render.ts 30 out.wav`.
   together. Swap its body for a Supabase Realtime presence channel; the
   callback contract stays the same.
 
+## On the phone
+
+Three things learned the hard way on a Pixel 9, all handled in the code:
+
+- **React Native stops delivering JavaScript timers while the activity is
+  paused, and a locked screen pauses it.** The engine's scheduler used to
+  die within seconds of the screen locking and the sound ran out. On
+  Android everything that keeps time (the engine tick, the breath, presence,
+  the score poll) now runs off a native 100 ms clock in `modules/pulse`,
+  which keeps ticking with the screen off. Verify with
+  `adb logcat | grep "diag ctx"` while the phone is locked.
+- **Haptics.** Every haptics library sends its pulses as touch feedback,
+  which Android drops when the user has touch feedback switched off. The
+  same module sends the breath as media vibration.
+- **Judge audio only on a release build.** A debug build compiles the audio
+  library's DSP unoptimized; its render thread pins a core and the sound
+  chops. `npx expo run:android --variant release`.
+
+The samples are always handed to the decoder as bytes: on the phone its
+file-path route produced silent buffers from the app's bundled assets.
+
 ## Running
 
 Web, for a quick look (the browser needs one touch before it will play):

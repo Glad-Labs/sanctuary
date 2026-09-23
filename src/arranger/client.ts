@@ -2,7 +2,13 @@
 import { composedScore } from './compose';
 import { sanitize, type Score } from './score';
 
-export function subscribeScore(url: string | undefined, onScore: (score: Score) => void): () => void {
+type Every = (fn: () => void, ms: number) => () => void;
+const everyDefault: Every = (fn, ms) => {
+  const id = setInterval(fn, ms);
+  return () => clearInterval(id);
+};
+
+export function subscribeScore(url: string | undefined, onScore: (score: Score) => void, every: Every = everyDefault): () => void {
   let stopped = false;
   let lastKey = '';
   const emit = (score: Score) => {
@@ -32,9 +38,9 @@ export function subscribeScore(url: string | undefined, onScore: (score: Score) 
     if (!stopped) emit(score ?? composedScore());
   };
   poll();
-  const timer = setInterval(poll, 60_000);
+  const stop = every(poll, 60_000);
   return () => {
     stopped = true;
-    clearInterval(timer);
+    stop();
   };
 }
