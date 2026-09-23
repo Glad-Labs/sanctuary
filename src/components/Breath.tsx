@@ -85,11 +85,13 @@ function hash01(n: number): number {
 function Dot({ index, clock, lit, energy, size, field, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; field: { w: number; h: number }; colour: string }) {
   const halfW = field.w / 2;
   const halfH = field.h / 2;
-  // home: near the orb for the first points, out toward the edges for the last
-  const angle0 = hash01(index) * Math.PI * 2;
+  // home: anywhere between the orb and the edge of the screen. Direction and
+  // distance follow golden-ratio sequences with a little jitter, so however
+  // few points are lit they are spread around and out, never huddled.
+  const angle0 = index * 2.399963 + (hash01(index) - 0.5) * 0.6;
   const dir = hash01(index + 150) < 0.5 ? 1 : -1;
   const orbit = 1500 + hash01(index + 50) * 2400; // 25 to 65 minutes per turn
-  const reach = Math.min(1, Math.pow(index / DOTS, 0.7) + hash01(index + 25) * 0.12);
+  const reach = Math.min(1, ((index * 0.618034) % 1) * 0.9 + hash01(index + 25) * 0.1);
   const inner = size * 0.62 + 30;
   const keepOut = size * 0.62 + 10; // never closer to the centre than this
   // the wander: two slow motions per axis, larger for points far from the orb
