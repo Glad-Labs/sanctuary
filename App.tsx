@@ -99,7 +99,8 @@ export default function App() {
       const d = new Date();
       const tide = droneRef.current?.score().tide;
       const density = droneRef.current?.status().density ?? 0.5;
-      return energyAt(Date.now() / 1000, tide) * localBalance(d.getHours() + d.getMinutes() / 60).top * (0.25 + 0.75 * density);
+      const present = droneRef.current?.melodyPresence() ?? 1;
+      return energyAt(Date.now() / 1000, tide) * localBalance(d.getHours() + d.getMinutes() / 60).top * (0.25 + 0.75 * density) * present;
     };
     let melodyTimer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribeScore = subscribeScore(SCORE_URL, (score) => {
