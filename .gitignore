@@ -42,3 +42,6 @@ yarn-error.*
 
 # arranger runtime log
 server/scores.jsonl
+
+# local native module build output
+modules/*/android/build/
