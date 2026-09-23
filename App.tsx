@@ -9,6 +9,7 @@ import { loadBuffers } from './src/audio/load';
 import { breathAt, type BreathPhase } from './src/breath';
 import { Breath } from './src/components/Breath';
 import { presenceAt, subscribePresence } from './src/presence';
+import { pulse } from './modules/pulse';
 
 const ROOM = 'rest';
 const NATIVE_ANIM = Platform.OS !== 'web';
@@ -116,7 +117,11 @@ export default function App() {
       const b = breathAt(Date.now());
       if (b.phase !== lastPhase) {
         lastPhase = b.phase;
-        if (Platform.OS !== 'web') {
+        if (Platform.OS === 'android') {
+          // sent as media vibration by our own module; every haptics library
+          // files pulses as touch feedback, which phones often have switched off
+          pulse(b.phase === 'in' ? 30 : 14, b.phase === 'in' ? 170 : 110);
+        } else if (Platform.OS === 'ios') {
           const pulse =
             b.phase === 'in'
               ? Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)

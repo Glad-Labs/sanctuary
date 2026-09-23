@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useFrameCallback,
@@ -25,7 +25,9 @@ import { breathAt, CYCLE_MS } from '../breath';
 // points than people, easing into a full field of 240 as the room grows past
 // a few hundred. The first points sit close to the orb and later ones reach
 // the edges, so a room fills outward as it grows.
-const DOTS = 240;
+// A phone applies every point's movement on its UI thread each frame, so it
+// carries fewer points and moves them at a lower rate.
+const DOTS = Platform.OS === 'web' ? 240 : 80;
 export function pointsFor(people: number): number {
   const n = Math.max(0, people);
   return Math.min(n, Math.round(DOTS * (1 - Math.exp(-n / DOTS))));
@@ -372,10 +374,14 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
     energyValue.value = energy;
   }, [people, energy, lit, energyValue]);
 
+  // The breath moves every frame; on a phone the points move every third
+  // frame (20 fps), which the eye does not notice at their speed.
+  const frameCount = useSharedValue(0);
   useFrameCallback(() => {
     const now = Date.now();
-    clock.value = now;
     fill.value = breathAt(now).fill;
+    frameCount.value = (frameCount.value + 1) % 3;
+    if (Platform.OS === 'web' || frameCount.value === 0) clock.value = now;
   });
 
   const hourNow = () => {

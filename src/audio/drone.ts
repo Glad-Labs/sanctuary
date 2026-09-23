@@ -10,6 +10,7 @@
 // Everything time-varying is a function of wall-clock seconds (`wall`) and is
 // scheduled at an audio-context time (`now`), so the same code renders offline.
 
+import { Platform } from 'react-native';
 import type {
   AnalyserNode,
   AudioBuffer,
@@ -225,25 +226,64 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   const breathGain = ctx.createGain();
   breathGain.gain.value = 1;
   breathGain.connect(tideGain);
-  const analyser: AnalyserNode = ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  master.connect(analyser);
-  const samples = new Float32Array(analyser.fftSize);
+  // the level meter is for the web build and tests; on a phone every node
+  // costs audio-thread time, so native does without it
+  const NATIVE = Platform.OS !== 'web' && options.autoTick !== false;
+  const analyser: AnalyserNode | null = NATIVE ? null : ctx.createAnalyser();
+  const samples = new Float32Array(1024);
+  if (analyser) {
+    analyser.fftSize = 1024;
+    master.connect(analyser);
+  }
 
   // dry and wet buses
   const dry = ctx.createGain();
   dry.gain.value = 0.8;
   dry.connect(breathGain);
-  const reverb = ctx.createConvolver();
-  reverb.buffer = impulseResponse(ctx, 6, seed + 11);
-  reverb.normalize = true;
   const wet = ctx.createGain();
   wet.gain.value = 0.3;
-  reverb.connect(wet);
   wet.connect(breathGain);
-  const toBoth = (node: { connect: (n: GainNode | typeof reverb) => unknown }) => {
+  // The hall. In a browser or offline it is a convolution with a six-second
+  // synthesized impulse. On a phone that convolution starves the audio thread
+  // (the sound chops), so native gets a light algorithmic hall instead: four
+  // feedback delay lines through a darkening filter, cross-coupled.
+  const reverbIn: GainNode = ctx.createGain();
+  if (Platform.OS === 'web' || options.autoTick === false) {
+    const conv = ctx.createConvolver();
+    conv.buffer = impulseResponse(ctx, 6, seed + 11);
+    conv.normalize = true;
+    reverbIn.connect(conv);
+    conv.connect(wet);
+  } else {
+    const lines = [0.0297, 0.0371, 0.0411, 0.0437].map((base, i) => {
+      const delay = ctx.createDelay(1);
+      delay.delayTime.value = base * 3.1 + unit(seed, 900 + i) * 0.01; // 90 to 140 ms
+      const damp = ctx.createBiquadFilter();
+      damp.type = 'lowpass';
+      damp.frequency.value = 2600;
+      const fb = ctx.createGain();
+      fb.gain.value = 0.86; // a long tail, still stable with the damping
+      delay.connect(damp);
+      damp.connect(fb);
+      fb.connect(delay);
+      reverbIn.connect(delay);
+      return { delay, damp };
+    });
+    // cross-couple so the tail turns diffuse rather than metallic
+    lines.forEach((l, i) => {
+      const x = ctx.createGain();
+      x.gain.value = -0.18;
+      l.damp.connect(x);
+      x.connect(lines[(i + 1) % lines.length].delay);
+    });
+    const sum = ctx.createGain();
+    sum.gain.value = 0.28;
+    lines.forEach((l) => l.damp.connect(sum));
+    sum.connect(wet);
+  }
+  const toBoth = (node: { connect: (n: GainNode) => unknown }) => {
     node.connect(dry);
-    node.connect(reverb);
+    node.connect(reverbIn);
   };
 
   // the pad: a warmth filter on the whole string body
@@ -294,10 +334,14 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   function makeLayer(id: string, rate: number, period: number, fade: number, phase: number, dest: GainNode | BiquadFilterNode, pan: number): Layer {
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    const panner = ctx.createStereoPanner();
-    panner.pan.value = pan;
-    gain.connect(panner);
-    panner.connect(dest);
+    if (NATIVE) {
+      gain.connect(dest); // no per-voice panning on a phone: the hall gives the width
+    } else {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = pan;
+      gain.connect(panner);
+      panner.connect(dest);
+    }
     return { id, rate, period, fade, phase, gain, lastK: -1 };
   }
 
@@ -589,6 +633,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       strike('vibra_ring', target, audioNow, (0.035 + Math.random() * 0.03) * (0.4 + 0.6 * density), Math.random() * 1.2 - 0.6);
     },
     level() {
+      if (!analyser) return 0;
       analyser.getFloatTimeDomainData(samples);
       let sum = 0;
       for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
