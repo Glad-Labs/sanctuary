@@ -136,7 +136,7 @@ function Frame({ id, size, disc, caption, children }: { id: string; size: number
 // The photographed sun: the red chromosphere near the horizon, the gold
 // corona toward noon, crossfaded by its height where you are, with a tint on
 // top. Live from SDO when online, yesterday's frames when not.
-function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky }) {
+function SunDisc({ size, sky, live, breathStyle }: { size: number; sky: Sky; live: LiveSky; breathStyle: ReturnType<typeof useAnimatedStyle> }) {
   const r = size / 2;
   const box = size / SDO_DISC;
   const high = Math.pow(sky.sun, 0.7);
@@ -151,6 +151,18 @@ function SunDisc({ size, sky, live }: { size: number; sky: Sky; live: LiveSky })
       <Svg width={size} height={size} style={{ position: 'absolute', left: 0, top: 0 }}>
         <Circle cx={r} cy={r} r={r} fill={low > 0.5 ? '#ff2a00' : '#fff1bd'} fillOpacity={low > 0.5 ? 0.1 + 0.3 * (low - 0.5) : 0.22 * (1 - low * 2)} />
       </Svg>
+      <Animated.View style={[StyleSheet.absoluteFill, breathStyle]}>
+        <Svg width={size} height={size}>
+          <Defs>
+            <RadialGradient id="sunBreath" cx="50%" cy="50%" r="50%">
+              <Stop offset="0" stopColor="#fff6e0" stopOpacity="1" />
+              <Stop offset="0.8" stopColor="#fff6e0" stopOpacity="0.6" />
+              <Stop offset="1" stopColor="#fff6e0" stopOpacity="0" />
+            </RadialGradient>
+          </Defs>
+          <Circle cx={r} cy={r} r={r} fill="url(#sunBreath)" />
+        </Svg>
+      </Animated.View>
     </>
   );
 }
@@ -285,10 +297,10 @@ export function Breath({ visible, density }: { visible: boolean; density: number
     return () => clearInterval(timer);
   }, []);
 
-  const orb = useAnimatedStyle(() => ({
-    transform: [{ scale: 0.86 + 0.14 * fill.value }],
-    opacity: visible ? 1 : 0,
-  }));
+  // The bodies never change size; the breath shows in their light and in the
+  // ring around them.
+  const orb = useAnimatedStyle(() => ({ opacity: visible ? 1 : 0 }));
+  const sunBreath = useAnimatedStyle(() => ({ opacity: 0.02 + 0.16 * fill.value }));
   const glow = useAnimatedStyle(() => ({
     transform: [{ scale: 1.15 + 0.45 * fill.value }],
     opacity: visible ? (0.35 + 0.45 * fill.value) * (0.5 + 0.7 * densityValue.value) : 0,
@@ -343,7 +355,7 @@ export function Breath({ visible, density }: { visible: boolean; density: number
       <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
         {sunOpacity > 0 && (
           <View style={[StyleSheet.absoluteFill, styles.body, { opacity: sunOpacity }]}>
-            <SunDisc size={size} sky={sky} live={live} />
+            <SunDisc size={size} sky={sky} live={live} breathStyle={sunBreath} />
           </View>
         )}
         {moonOpacity > 0 && (

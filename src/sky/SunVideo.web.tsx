@@ -2,6 +2,7 @@
 // same radial mask as the stills, the red chromosphere crossfading to the
 // gold corona by the sun's height. Web only; the browser streams the files.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { breathAt } from '../breath';
 import { sunMovieUris } from './live';
 
 const RATE = 0.6; // a little slower than NASA's cut, calmer
@@ -18,6 +19,18 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
       v.play().catch(() => {});
     }
   }, [uris]);
+  // The sun breathes in light: its brightness rises with every inhale.
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      const { fill } = breathAt(Date.now());
+      const filter = `brightness(${(1.02 + 0.3 * fill).toFixed(3)}) saturate(1.05)`;
+      for (const v of [hot.current, gold.current]) if (v) v.style.filter = filter;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
   if (failed) return null;
 
   const video = size / disc; // the frame, scaled so the disc matches the orb
@@ -51,7 +64,7 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
       playsInline: true,
       preload: 'auto',
       onError: () => setFailed(true),
-      style: { position: 'absolute', left: inset, top: inset, width: video, height: video, opacity, transition: 'opacity 2s linear', filter: 'brightness(1.12) saturate(1.05)' },
+      style: { position: 'absolute', left: inset, top: inset, width: video, height: video, opacity, transition: 'opacity 2s linear' },
     });
   return React.createElement('div', { style }, layer(uris.hot, 1, hot), layer(uris.gold, high, gold));
 }

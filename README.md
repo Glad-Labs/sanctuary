@@ -29,8 +29,9 @@ afterward? Put it in front of twenty people with their eyes closed.
   vibraphone ring.
 - **One shared breath** (`src/breath.ts`). Five seconds in, five out, the
   pace of a resting breath, with a natural pause at each end, phased from
-  the wall clock so the whole world inhales together. The orb swells, the
-  sea swells, the phone pulses at each turn of the breath.
+  the wall clock so the whole world inhales together. The sun brightens,
+  the moon steps a frame, the ring around them swells, the sea swells, and
+  the phone pulses at each turn of the breath. The bodies never change size.
 - **The sky is real, and live.** By day the orb is the sun as NASA's Solar
   Dynamics Observatory sees it right now, the red chromosphere near the
   horizon crossfading to the gold corona toward noon, its limb ragged with
