@@ -77,6 +77,7 @@ export function energyAt(wall: number, tide: CleanScore['tide'] = DEFAULT_SCORE.
   const shape = Math.pow(arc, 1.4) * (0.55 + 0.45 * swell);
   return tide.floor + (tide.peak - tide.floor) * shape;
 }
+const BOWL_SLOT_S = 30;
 const PERIOD_S = 9; // a new instance of each voice every PERIOD_S, crossfaded over FADE_S
 const FADE_S = 4;
 const MASTER = 1.0;
@@ -176,7 +177,7 @@ export interface Drone {
   /** RMS of what is reaching the speaker, 0..1. For visuals and for proving sound is flowing. */
   level(): number;
   /** What the engine is doing right now, for the curious and for tests. */
-  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number };
+  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number; bowls: number };
 }
 
 interface Layer {
@@ -363,6 +364,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let lastRing = -Infinity;
   let lastRingListeners = 0;
   let rings = 0;
+  let bowls = 0;
 
   function tick(wall: number, now: number) {
     if (pending && wall >= pending.validFrom) {
@@ -406,16 +408,25 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
     breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
 
-    // bowls: once per window, more often as the room fills, at a moment everyone shares
-    // bowls are a full-room sound: rare and soft when few are here
+    // bowls: the clock is cut into fixed 30 s slots (so the slot number never
+    // jumps as the room changes), and each slot rings at most once, with a
+    // probability set by how full the room is and where the tide stands.
+    // Everyone shares the slot, the roll, and the moment within it.
     const bowlWindow = (110 - 80 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
     last.bowlWindow = bowlWindow;
-    const bw = Math.floor(wall / bowlWindow);
-    if (bw !== lastBowlWindow && wall - bw * bowlWindow >= unit(seed, bw * 5) * (bowlWindow - 8)) {
-      lastBowlWindow = bw;
-      const chord = chordAt(wall);
-      const target = nearestChordTone(chord, 62 + (unit(seed, bw * 5 + 1) - 0.5) * 6, 2);
-      strike('bowl_1', target, now, (0.1 + 0.08 * unit(seed, bw * 5 + 2)) * (0.5 + 0.5 * density), unit(seed, bw * 5 + 3) * 1.2 - 0.6);
+    const slot = Math.floor(wall / BOWL_SLOT_S);
+    if (slot !== lastBowlWindow) {
+      const rings = unit(seed, slot * 5) < BOWL_SLOT_S / bowlWindow;
+      const at = unit(seed, slot * 5 + 1) * (BOWL_SLOT_S - 8);
+      if (rings && wall - slot * BOWL_SLOT_S >= at) {
+        lastBowlWindow = slot;
+        bowls += 1;
+        const chord = chordAt(wall);
+        const target = nearestChordTone(chord, 62 + (unit(seed, slot * 5 + 2) - 0.5) * 6, 2);
+        strike('bowl_1', target, now, (0.1 + 0.08 * unit(seed, slot * 5 + 3)) * (0.5 + 0.5 * density), unit(seed, slot * 5 + 4) * 1.2 - 0.6);
+      } else if (!rings || wall - slot * BOWL_SLOT_S >= at) {
+        lastBowlWindow = slot; // this slot is settled: silent, or already past its moment
+      }
     }
     // gongs: rare, very soft, on the root
     const gw = Math.floor(wall / 240);
@@ -452,7 +463,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       density = densityFor(count);
     },
     status() {
-      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings };
+      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings, bowls };
     },
     setScore(score) {
       if (score.validFrom <= Date.now() / 1000 && autoTick) current = score;
