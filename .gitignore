@@ -45,3 +45,4 @@ server/scores.jsonl
 
 # local native module build output
 modules/*/android/build/
+server/arranger.log

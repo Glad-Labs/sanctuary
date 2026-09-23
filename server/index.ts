@@ -70,7 +70,7 @@ async function livePresence(room: string): Promise<PresenceReport> {
         seen.add(id); count += 1; add(tz);
       }
     } catch (e) {
-      if (!(e instanceof Error && /not found/i.test(e.message))) console.warn('livekit presence failed:', e instanceof Error ? e.message : e);
+      if (!(e instanceof Error && /not found|does not exist/i.test(e.message))) console.warn('livekit presence failed:', e instanceof Error ? e.message : e);
     }
   }
   const cutoff = Date.now() - HEARTBEAT_TTL_MS;
@@ -192,8 +192,12 @@ async function refine(inputs: RoomInputs, draft: CleanScore): Promise<{ body: Cl
 }
 
 let lastPerformer: string | null = null;
+// Bumped whenever someone steps on or off the stage. A score begun before the
+// change (a slow model call, say) is stale when it lands and is dropped.
+let stageEpoch = 0;
 
 async function arrange(lead = LEAD_S) {
+  const epoch = stageEpoch;
   const live = await livePresence(ROOM);
   const inputs = roomInputs(Date.now(), livekit ? live : undefined);
   const draft = compose(inputs);
@@ -202,6 +206,10 @@ async function arrange(lead = LEAD_S) {
   const refined = inputs.performer ? { body: draft, source: 'composer' as const } : await refine(inputs, draft);
   const body = inputs.performer ? liveScore(refined.body, inputs.performer.name) : refined.body;
   const { source, usage, error } = refined as { body: CleanScore; source: Score['source']; usage?: unknown; error?: string };
+  if (epoch !== stageEpoch) {
+    console.log(`[${new Date().toISOString()}] dropped "${body.title}": the stage changed while it was being written`);
+    return;
+  }
   const validFrom = Math.floor(Date.now() / 1000) + lead;
   const score: Score = { ...body, validFrom, ttl: INTERVAL_S, source, model: source === 'model' ? MODEL_NAME ?? undefined : undefined };
   const entry: Entry = { at: Date.now(), inputs, draft, score, usage, error };
@@ -265,6 +273,7 @@ setInterval(async () => {
   const p = (await livePresence(ROOM)).performer?.name ?? null;
   if (p !== lastPerformer) {
     lastPerformer = p;
+    stageEpoch++;
     console.log(`[${new Date().toISOString()}] stage: ${p ? `${p} is live` : 'empty'}`);
     arrange(20);
   }
