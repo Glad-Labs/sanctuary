@@ -116,7 +116,7 @@ export function densityFor(listeners: number): number {
 }
 /** How many voices a room of this size can reach: two when nearly empty, all seven when packed. */
 export function voicesFor(listeners: number): number {
-  return 2 + Math.round(densityFor(listeners) * (ROLES.length - 2));
+  return 3 + Math.round(densityFor(listeners) * (ROLES.length - 3));
 }
 
 function pick(kinds: ReadonlyArray<SampleKind>, midi: number): SampleDef | undefined {
@@ -316,6 +316,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     makeLayer('cymbal_bow_2', 0.75, 9, 4, 4.5, padFilter, 0.6),
   ];
   const sea = makeLayer('ocean', 1, 22, 5, 0, bedFilter, 0);
+  const air = makeLayer('breeze', 1, 22, 5, 11, bedFilter, 0.2); // a breeze with birds, now and then
 
   /** Schedule instance k of a layer; `at` is audio time, `offset` how far in (wall s) it already is. */
   function scheduleInstance(layer: Layer, k: number, startWall: number, at: number, offset: number) {
@@ -399,7 +400,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // around every several minutes; they run deep in a small room and shallow
     // in a full one, so a full room overlaps and flows while a small one rests.
     const calm = 1 - smoothstep(0.3, 0.6, weave(500, wall, 480)); // 1 = a spell of calm
-    const restDepth = 0.15 + 0.6 * (1 - density);
+    const restDepth = 0.1 + 0.35 * (1 - density);
     const voicesNow = (1 + energy * (voices - 1) * 0.85) * (1 - restDepth * calm);
     const threshold = 1 - voicesNow / ROLES.length;
 
@@ -421,7 +422,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const warmth = (600 + 1800 * sc.warmth) * here.warmth * (0.55 + 0.75 * density);
     padFilter.frequency.setTargetAtTime(warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
     // a full room is a little louder than an empty one
-    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.5 + 0.5 * density), now, 8);
+    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.6 + 0.4 * density), now, 8);
 
     // textures: shimmer that only appears as the room fills, near the peak
     const shimmerIn = smoothstep(0.5, 0.8, weave(300, wall, 320)) * (1 - 0.8 * calm);
@@ -436,6 +437,10 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const { fill } = breathAt(wall * 1000);
     advance(sea, wall, now, true);
     // the sea is what remains when the tide is out
+    // the breeze and its birds drift in now and then, never during calm
+    const airIn = smoothstep(0.55, 0.8, weave(600, wall, 400)) * (1 - calm);
+    advance(air, wall, now, airIn > 0.001);
+    air.gain.gain.setTargetAtTime(0.022 * airIn, now, 15);
     // the sea is always there
     sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
     breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
@@ -444,7 +449,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // jumps as the room changes), and each slot rings at most once, with a
     // probability set by how full the room is and where the tide stands.
     // Everyone shares the slot, the roll, and the moment within it.
-    const bowlWindow = (110 - 80 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
+    const bowlWindow = (95 - 65 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
     last.bowlWindow = bowlWindow;
     const slot = Math.floor(wall / BOWL_SLOT_S);
     if (slot !== lastBowlWindow) {

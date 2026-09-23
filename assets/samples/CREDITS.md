@@ -9,4 +9,5 @@ and loudness-normalized.
 - `bowl_1`: "SingingBowl1.ogg" by BambooBeast, public domain, Wikimedia Commons.
 - `gong_55`: "Gong55.ogg" by stephan, CC0, Wikimedia Commons.
 - `gong_vibrant`: "Gong or bell vibrant (short).ogg", PDSounds, CC0, Wikimedia Commons.
+- `breeze`: "Gentle breeze and birds singing.ogg" by ezwa, public domain, Wikimedia Commons.
 - `ocean`: "Ocean Waves on a Tropical Beach.ogg" by Jarrod Stanley, CC0, Wikimedia Commons.

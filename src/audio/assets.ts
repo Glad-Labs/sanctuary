@@ -4,6 +4,7 @@ export const SAMPLE_ASSETS: Record<string, number> = {
   bass_30: require('../../assets/samples/bass_30.mp3'),
   bass_34: require('../../assets/samples/bass_34.mp3'),
   bowl_1: require('../../assets/samples/bowl_1.mp3'),
+  breeze: require('../../assets/samples/breeze.mp3'),
   cello_36: require('../../assets/samples/cello_36.mp3'),
   cello_40: require('../../assets/samples/cello_40.mp3'),
   cello_43: require('../../assets/samples/cello_43.mp3'),
