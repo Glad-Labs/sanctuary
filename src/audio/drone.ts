@@ -407,14 +407,15 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
 
     // bowls: once per window, more often as the room fills, at a moment everyone shares
-    const bowlWindow = (60 - 30 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
+    // bowls are a full-room sound: rare and soft when few are here
+    const bowlWindow = (110 - 80 * density) * (1.6 - 0.8 * energy) * (1.7 - 1.2 * sc.bowls);
     last.bowlWindow = bowlWindow;
     const bw = Math.floor(wall / bowlWindow);
     if (bw !== lastBowlWindow && wall - bw * bowlWindow >= unit(seed, bw * 5) * (bowlWindow - 8)) {
       lastBowlWindow = bw;
       const chord = chordAt(wall);
       const target = nearestChordTone(chord, 62 + (unit(seed, bw * 5 + 1) - 0.5) * 6, 2);
-      strike('bowl_1', target, now, 0.1 + 0.08 * unit(seed, bw * 5 + 2), unit(seed, bw * 5 + 3) * 1.2 - 0.6);
+      strike('bowl_1', target, now, (0.1 + 0.08 * unit(seed, bw * 5 + 2)) * (0.5 + 0.5 * density), unit(seed, bw * 5 + 3) * 1.2 - 0.6);
     }
     // gongs: rare, very soft, on the root
     const gw = Math.floor(wall / 240);
@@ -462,13 +463,14 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     },
     join(audioNow = ctx.currentTime) {
       if (!running) return;
-      // Arrivals come every few seconds in a full room; ring for one in four, never within 12 s.
+      // Arrivals come every few seconds in a full room; ring for one in four,
+      // never within 12 s when full, and far more rarely and softly when the room is small.
       arrivals += 1;
-      if (arrivals % 4 !== 0 || audioNow - lastRing < 12) return;
+      if (arrivals % 4 !== 0 || audioNow - lastRing < 12 + 40 * (1 - density)) return;
       lastRing = audioNow;
       const chord = chordAt(Date.now() / 1000);
       const target = nearestChordTone(chord, 64 + (Math.random() - 0.5) * 8, 2, 12);
-      strike('vibra_ring', target, audioNow, 0.05 + Math.random() * 0.04, Math.random() * 1.2 - 0.6);
+      strike('vibra_ring', target, audioNow, (0.05 + Math.random() * 0.04) * (0.4 + 0.6 * density), Math.random() * 1.2 - 0.6);
     },
     level() {
       analyser.getFloatTimeDomainData(samples);

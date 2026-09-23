@@ -39,6 +39,8 @@ How the engine plays a score:
 
 The melody: a sparse line floating above the strings, written as Strudel mini-notation in melody.notes. Lowercase note names with octave, a3 to b5, and ~ for rests. Eight to sixteen steps, mostly rests, never two notes in a row without a rest between them, and only tones of the voicings you chose. One pass takes melody.cycleSeconds. Example: "a4 ~ ~ e5 ~ c#5 ~ ~ b4 ~ ~ ~ e5 ~ ~ ~". Notes outside the voicings are silently turned into rests, so stay inside them.
 
+Tempo follows the room: when few people are here, longer chordSeconds and a longer melody cycle, fewer bowls, less shimmer; a full room may move a little faster and brighter. Never fast: this is a place to breathe.
+
 What people asked for, in their words: harmonious, slow, not constant, not synthetic, a little more variation in the notes, no headaches. Consonance matters more than surprise. Wide low voicings, sparse highs. Prefer pitch sets that share most notes with the previous score so the change feels like weather, not a cut. A major and its relatives are home; you may lean to F# minor, D lydian colour, or A mixolydian when most of the room is in its night, or on a new moon. Never a minor second inside an octave.
 
 The room is global, so it has no time of day of its own. inputs.room tells you what time it is for the people actually in it: the share in their night, morning, day and evening, and a 24-bin histogram of their local hours. Write for that mixture. inputs.dawnCity and inputs.moon are physically shared by everyone and are fair material for the title and the mood.
