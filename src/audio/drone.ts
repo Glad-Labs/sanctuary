@@ -15,6 +15,7 @@ import type {
   AnalyserNode,
   AudioBuffer,
   AudioContext,
+  AudioParam,
   BiquadFilterNode,
   GainNode,
 } from 'react-native-audio-api';
@@ -229,6 +230,19 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   // the level meter is for the web build and tests; on a phone every node
   // costs audio-thread time, so native does without it
   const NATIVE = Platform.OS !== 'web' && options.autoTick !== false;
+
+  // Smoothly steer a parameter toward a target. Each call would add an
+  // automation event that the audio thread must scan every sample, so the
+  // previous events are cancelled first and nothing is scheduled at all when
+  // the target has barely moved. Keeps the audio thread's work flat over hours.
+  const aimed = new Map<AudioParam, number>();
+  const aim = (param: AudioParam, target: number, now: number, tau: number) => {
+    const last = aimed.get(param);
+    if (last !== undefined && Math.abs(target - last) <= Math.max(0.004, Math.abs(last) * 0.015)) return;
+    aimed.set(param, target);
+    param.cancelScheduledValues(now);
+    param.setTargetAtTime(target, now, tau);
+  };
   const analyser: AnalyserNode | null = NATIVE ? null : ctx.createAnalyser();
   const samples = new Float32Array(1024);
   if (analyser) {
@@ -516,15 +530,15 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       const lfo = 0.8 + 0.2 * Math.sin((TAU * wall) / slotLfo[s].period + slotLfo[s].phase);
       const seat = s >= 2 ? here.top : 1; // viola and above soften at your night
       const crowd = s >= 3 ? 0.7 + 0.6 * density : 1; // violins and flute come forward as the room fills
-      layer.gain.gain.setTargetAtTime(ROLES[s].level * lfo * presence * seat * crowd, now, 12);
+      aim(layer.gain.gain, ROLES[s].level * lfo * presence * seat * crowd, now, 12);
       voiceState[s] = presence;
     });
     last = { ...last, voicesNow: voiceState.reduce((a, b) => a + b, 0), calm };
     // a full room is brighter and more open; an empty one is close and dark
     const warmth = (600 + 1800 * sc.warmth) * here.warmth * (0.55 + 0.75 * density);
-    padFilter.frequency.setTargetAtTime(warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
+    aim(padFilter.frequency, warmth * (0.6 + 0.5 * energy) + 300 * Math.sin((TAU * wall) / 151), now, 3);
     // a full room is a little louder than an empty one
-    tideGain.gain.setTargetAtTime((0.55 + 0.45 * energy) * here.level * (0.6 + 0.4 * density), now, 8);
+    aim(tideGain.gain, (0.55 + 0.45 * energy) * here.level * (0.6 + 0.4 * density), now, 8);
 
     // textures: shimmer that only appears as the room fills, near the peak
     const shimmerIn = smoothstep(0.5, 0.8, weave(300, wall, 320)) * (1 - 0.8 * calm);
@@ -532,13 +546,13 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     last = { ...last, energy, shimmer };
     textures.forEach((layer, i) => {
       advance(layer, wall, now, true);
-      layer.gain.gain.setTargetAtTime(shimmer * (i === 0 ? 1 : 0.7), now, 6);
+      aim(layer.gain.gain, shimmer * (i === 0 ? 1 : 0.7), now, 6);
     });
 
     // the melody follows the tide, the listener's hour, the size of the room,
     // and its own tide of presence, like the upper strings
     const melodyIn = smoothstep(0.45, 0.75, weave(400, wall, 330)) * (1 - 0.7 * calm);
-    melodyBus.gain.setTargetAtTime(energy * here.top * (0.25 + 0.75 * density) * melodyIn, now, 4);
+    aim(melodyBus.gain, energy * here.top * (0.25 + 0.75 * density) * melodyIn, now, 4);
     advanceMelody(sc, wall, now);
 
     // beds: the sea breathes with everyone
@@ -548,10 +562,10 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // the breeze and its birds drift in now and then, never during calm
     const airIn = smoothstep(0.55, 0.8, weave(600, wall, 400)) * (1 - calm);
     advance(air, wall, now, airIn > 0.001);
-    air.gain.gain.setTargetAtTime(0.022 * airIn, now, 15);
+    aim(air.gain.gain, 0.022 * airIn, now, 15);
     // the sea is always there
-    sea.gain.gain.setTargetAtTime((0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
-    breathGain.gain.setTargetAtTime(0.96 + 0.04 * fill, now, 0.8);
+    aim(sea.gain.gain, (0.04 + 0.05 * (1 - energy)) * (0.6 + 0.7 * fill) * (0.4 + 1.2 * sc.sea) * here.sea * (1.5 - 0.8 * density), now, 1.0);
+    aim(breathGain.gain, 0.96 + 0.04 * fill, now, 0.8);
 
     // bowls: the clock is cut into fixed 30 s slots (so the slot number never
     // jumps as the room changes), and each slot rings at most once, with a
