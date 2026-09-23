@@ -398,7 +398,7 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
   }, []);
 
   // The bodies never change size; the breath shows in their light and in the
-  // ring around them.
+  // ring around them, which is drawn in front so it passes over the limb.
   const orb = useAnimatedStyle(() => ({ opacity: visible ? 1 : 0 }));
   const sunBreath = useAnimatedStyle(() => ({ opacity: 0.02 + 0.16 * fill.value }));
   const glow = useAnimatedStyle(() => ({
@@ -434,6 +434,19 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
         <Rect x="0" y="0" width={box} height={box} fill="url(#ground)" />
       </Svg>
 
+      <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
+        {sunOpacity > 0 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: sunOpacity }]}>
+            <SunDisc size={size} sky={sky} live={live} breathStyle={sunBreath} />
+          </View>
+        )}
+        {moonOpacity > 0 && (
+          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: moonOpacity }]}>
+            <MoonDisc size={size} phase={phase} live={live} clock={clock} />
+          </View>
+        )}
+      </Animated.View>
+
       <Animated.View style={[styles.layer, glow, { width: size, height: size }]}>
         <Svg width={size} height={size}>
           <Defs>
@@ -452,19 +465,6 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
         <Svg width={size} height={size}>
           <Circle cx={size / 2} cy={size / 2} r={size / 2 - 1} stroke={aura} strokeWidth={1} fill="none" />
         </Svg>
-      </Animated.View>
-
-      <Animated.View style={[styles.layer, styles.body, orb, { width: size, height: size }]}>
-        {sunOpacity > 0 && (
-          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: sunOpacity }]}>
-            <SunDisc size={size} sky={sky} live={live} breathStyle={sunBreath} />
-          </View>
-        )}
-        {moonOpacity > 0 && (
-          <View style={[StyleSheet.absoluteFill, styles.body, { opacity: moonOpacity }]}>
-            <MoonDisc size={size} phase={phase} live={live} clock={clock} />
-          </View>
-        )}
       </Animated.View>
 
       {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} field={field} colour={aura} />)}
