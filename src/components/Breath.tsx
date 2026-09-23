@@ -130,8 +130,9 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
       y = (y / Math.max(1, dist)) * keepOut;
     }
     return {
-      opacity: shown * (0.6 + 0.12 * breath + 0.28 * own) * (0.8 + 0.2 * energy.value),
-      transform: [{ translateX: x }, { translateY: y }, { scale: grow }],
+      // each point pulses in brightness on its own rhythm, from a dim ember to full
+      opacity: shown * (0.3 + 0.1 * breath + 0.6 * Math.min(1, own * 1.4)) * (0.8 + 0.2 * energy.value),
+      transform: [{ translateX: x }, { translateY: y }, { scale: grow * (0.9 + 0.2 * own) }],
     };
   });
   return (
