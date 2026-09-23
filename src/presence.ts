@@ -213,7 +213,9 @@ async function connectLive(tokenUrl: string, onCount: (count: number) => void, o
   });
   room.on(RoomEvent.TrackUnsubscribed, (track, pub) => {
     if (track.kind !== Track.Kind.Audio) return;
+    // LiveKit may have detached the element already, so remove the one we added too
     track.detach().forEach((el) => el.remove());
+    elements.get(pub.trackSid)?.remove();
     elements.delete(pub.trackSid);
     report();
   });

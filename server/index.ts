@@ -34,6 +34,14 @@ const LIVEKIT_SECRET = process.env.LIVEKIT_API_SECRET ?? 'sanctuary-dev-secret-c
 const livekit = process.env.LIVEKIT_DISABLED ? null : new RoomServiceClient(LIVEKIT_URL.replace(/^ws/, 'http'), LIVEKIT_KEY, LIVEKIT_SECRET);
 // A performer joins with this key and may publish audio. Development value; change it.
 const PERFORMER_KEY = process.env.PERFORMER_KEY ?? 'sanctuary-stage-dev';
+// Development keys are fine on a private network and never anywhere else.
+if (/^wss:|^https:/.test(LIVEKIT_URL) && !process.env.LIVEKIT_DISABLED) {
+  const missing = ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'PERFORMER_KEY'].filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error(`refusing to start against ${LIVEKIT_URL} without ${missing.join(', ')} (see scripts/arranger.sh)`);
+    process.exit(1);
+  }
+}
 
 // Listeners that are not in the LiveKit room (phones, which keep WebRTC out of
 // their audio path until a performer is live) report themselves with a

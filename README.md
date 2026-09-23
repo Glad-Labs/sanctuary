@@ -134,12 +134,30 @@ doing with it. Offline, `LISTENERS=40 npx tsx scripts/render.ts 30 out.wav`.
 
 ## Presence: the real room
 
-Presence is a LiveKit room, one per Sanctuary room, self-hosted on this
-machine in Docker and reached over Tailscale. Every device joins as a silent
-participant (subscribe only, no microphone) carrying its UTC offset as
-metadata, so the count is real and the arranger gets a true histogram of
-the listeners' local hours. The same connection will carry a performer's
-audio later.
+Presence has two halves. Every device, web and phone, sends a heartbeat to
+the arranger with a random id and its UTC offset, so the count is real and
+the arranger gets a true histogram of the listeners' local hours. The
+performer's audio travels over LiveKit, and a device joins the LiveKit room
+only while someone is on stage, so the media server carries traffic only
+during a performance.
+
+LiveKit runs on LiveKit Cloud for anything shared beyond this machine. The
+arranger reads its address and keys, and the performer key, from
+`~/.sanctuary/sanctuary.env`, which lives outside the repo:
+
+```bash
+LIVEKIT_URL=wss://<project>.livekit.cloud
+LIVEKIT_API_KEY=...
+LIVEKIT_API_SECRET=...
+PERFORMER_KEY=...   # openssl rand -hex 16
+```
+
+Start the arranger with `scripts/arranger.sh`, which loads that file. It
+refuses to start against a `wss://` LiveKit with any of those missing, so
+development keys never reach a public server.
+
+For purely local work, LiveKit can still run self-hosted in Docker with the
+development keys in `server/livekit.yaml`:
 
 ```bash
 docker run -d --name sanctuary-livekit --restart unless-stopped \

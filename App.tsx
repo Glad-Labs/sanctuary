@@ -40,7 +40,9 @@ const SCORE_URL =
 const ARRANGER = SCORE_URL?.replace(/\/score$/, '');
 const TOKEN_URL = ARRANGER ? `${ARRANGER}/token?room=${ROOM}` : undefined;
 const HEARTBEAT_URL = ARRANGER ? `${ARRANGER}/heartbeat?room=${ROOM}` : undefined;
-const PRESENCE = Platform.OS === 'web' ? { tokenUrl: TOKEN_URL } : { tokenUrl: TOKEN_URL, heartbeatUrl: HEARTBEAT_URL, joinForPerformer: true };
+// Everyone reports presence by heartbeat and joins LiveKit only while a
+// performer is live, so the media server is in use only during a performance.
+const PRESENCE = { tokenUrl: TOKEN_URL, heartbeatUrl: HEARTBEAT_URL, joinForPerformer: true };
 const PERFORM = performerParams();
 
 export default function App() {
