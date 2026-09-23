@@ -20,12 +20,13 @@ const MOON_TEXTURE = require('../../assets/sky/moon.jpg');
 import { moonAt } from '../arranger/inputs';
 import { breathAt, CYCLE_MS } from '../breath';
 
-// The points of light: one pool, lit by how many people are here. The count
-// follows a saturating curve, steep at first and flat at the top, so a few
-// hundred people already look like company and a great crowd becomes a field.
-const DOTS = 140;
+// The points of light: one pool across the whole screen, lit by how many
+// people are here. The curve is steep at the start, so even a few dozen people
+// light the room, and flat at the top. The first points sit close to the orb
+// and later ones reach the edges, so a room fills outward as it grows.
+const DOTS = 220;
 export function pointsFor(people: number): number {
-  return Math.round(DOTS * (1 - Math.exp(-Math.max(0, people) / 2500)));
+  return Math.round(DOTS * (1 - Math.exp(-Math.sqrt(Math.max(0, people)) / 11)));
 }
 
 // ---- the sky where you are ------------------------------------------------
@@ -77,11 +78,16 @@ function hash01(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
-function Dot({ index, clock, lit, energy, size, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; colour: string }) {
+function Dot({ index, clock, lit, energy, size, field, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; field: { w: number; h: number }; colour: string }) {
+  // home position: a ring around the orb for the first points, out to the
+  // corners of the screen for the last, each with its own jitter
   const angle0 = hash01(index) * Math.PI * 2;
-  const period = 240 + hash01(index + 50) * 300; // four to nine minutes per orbit
-  const radius = size * (0.64 + hash01(index + 100) * 0.62);
-  const d = 6 + Math.round(hash01(index + 400) * 6); // 6 to 12 px, glow included
+  const reach = Math.pow(index / DOTS, 0.7) + hash01(index + 25) * 0.12;
+  const maxR = Math.hypot(field.w, field.h) / 2;
+  const radius = size * 0.62 + (maxR - size * 0.62) * Math.min(1, reach);
+  const period = 240 + hash01(index + 50) * 300; // four to nine minutes per slow turn
+  const driftA = 4 + hash01(index + 75) * 12; // px of wander
+  const d = 5 + Math.round(hash01(index + 400) * 7); // 5 to 12 px, glow included
   const dir = hash01(index + 150) < 0.5 ? 1 : -1;
   const p1 = 6 + hash01(index + 200) * 10; // seconds
   const p2 = 17 + hash01(index + 250) * 26;
@@ -90,13 +96,15 @@ function Dot({ index, clock, lit, energy, size, colour }: { index: number; clock
   const style = useAnimatedStyle(() => {
     const t = clock.value / 1000;
     const shown = index < lit.value ? 1 : 0;
-    const a = angle0 + (dir * t * Math.PI * 2) / period;
+    const a = angle0 + (dir * t * Math.PI * 2) / (period * 6); // a very slow turn about the orb
     const breath = breathAt(clock.value).fill;
     const own = (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p1 + f1)) * (0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / p2 + f2));
-    const r = radius * (0.97 + 0.04 * breath + 0.02 * own);
+    const r = radius * (0.985 + 0.02 * breath);
+    const wx = driftA * Math.sin((Math.PI * 2 * t) / period + f1);
+    const wy = driftA * Math.cos((Math.PI * 2 * t) / (period * 1.3) + f2);
     return {
       opacity: shown * (0.12 + 0.18 * breath + 0.6 * own) * (0.55 + 0.45 * energy.value),
-      transform: [{ translateX: Math.cos(a) * r }, { translateY: Math.sin(a) * r }],
+      transform: [{ translateX: Math.cos(a) * r + wx }, { translateY: Math.sin(a) * r + wy }],
     };
   });
   return (
@@ -319,7 +327,8 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
   }));
 
   const dots = useMemo(() => Array.from({ length: DOTS }, (_, i) => i), []);
-  const box = size * 2.6;
+  const box = Math.max(width, height) * 1.2; // the ground covers the whole page
+  const field = { w: width, h: height };
   const { palette, daylight } = sky;
   // The aura is a ring just outside the body that breathes outward: the sun's
   // colour by day, moonlight white by night.
@@ -329,11 +338,12 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
   const sunOpacity = Math.min(1, Math.max(0, (daylight - 0.4) / 0.2));
   const moonOpacity = Math.min(1, Math.max(0, (0.6 - daylight) / 0.2));
   return (
-    <View style={[styles.wrap, { width: box, height: box }]}>
-      <Svg style={StyleSheet.absoluteFill} width={box} height={box}>
+    <View style={[styles.wrap, StyleSheet.absoluteFill]}>
+      <Svg style={{ position: 'absolute', left: (width - box) / 2, top: (height - box) / 2 }} width={box} height={box}>
         <Defs>
           <RadialGradient id="ground" cx="50%" cy="50%" r="50%">
             <Stop offset="0" stopColor={palette.ground} stopOpacity="1" />
+            <Stop offset="0.5" stopColor={palette.ground} stopOpacity="0.5" />
             <Stop offset="1" stopColor={palette.ground} stopOpacity="0" />
           </RadialGradient>
         </Defs>
@@ -373,7 +383,7 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
         )}
       </Animated.View>
 
-      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} colour={aura} />)}
+      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} field={field} colour={aura} />)}
     </View>
   );
 }
@@ -383,6 +393,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   layer: { position: 'absolute' },
   body: { overflow: 'visible' },
