@@ -90,7 +90,7 @@ export default function App() {
       listeners = n;
       show();
       droneRef.current?.setListeners(n);
-      if (event === 'join') droneRef.current?.join();
+      if (event === 'join') droneRef.current?.join(undefined, n);
     });
     const timer = setInterval(show, 5000);
     // the melody follows the tide and the listener's hour, like the upper strings

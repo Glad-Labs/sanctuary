@@ -171,11 +171,12 @@ export interface Drone {
   setScore(score: Score): void;
   /** The score in effect at this moment. */
   score(): CleanScore;
-  join(audioNow?: number): void;
+  /** Someone arrived; `count` is the room size now. Rings only for real growth, rarely. */
+  join(audioNow?: number, count?: number): void;
   /** RMS of what is reaching the speaker, 0..1. For visuals and for proving sound is flowing. */
   level(): number;
   /** What the engine is doing right now, for the curious and for tests. */
-  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number };
+  status(): { listeners: number; density: number; voicesAllowed: number; voicesNow: number; energy: number; shimmer: number; bowlWindow: number; rings: number };
 }
 
 interface Layer {
@@ -361,6 +362,8 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let lastGongWindow = -1;
   let arrivals = 0;
   let lastRing = -Infinity;
+  let lastRingListeners = 0;
+  let rings = 0;
 
   function tick(wall: number, now: number) {
     if (pending && wall >= pending.validFrom) {
@@ -452,7 +455,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       density = densityFor(count);
     },
     status() {
-      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow) };
+      return { listeners, density: +density.toFixed(2), voicesAllowed: activeVoices, voicesNow: +last.voicesNow.toFixed(2), energy: +last.energy.toFixed(2), shimmer: +last.shimmer.toFixed(3), bowlWindow: Math.round(last.bowlWindow), rings };
     },
     setScore(score) {
       if (score.validFrom <= Date.now() / 1000 && autoTick) current = score;
@@ -461,16 +464,20 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     score() {
       return current;
     },
-    join(audioNow = ctx.currentTime) {
+    join(audioNow = ctx.currentTime, count = listeners) {
       if (!running) return;
-      // Arrivals come every few seconds in a full room; ring for one in four,
-      // never within 12 s when full, and far more rarely and softly when the room is small.
+      // A chime marks the room actually growing, not the count wobbling: the
+      // room must be larger than it was at the last chime, by a person or two
+      // percent, and chimes are at least 30 s apart when full, 90 s when empty.
       arrivals += 1;
-      if (arrivals % 4 !== 0 || audioNow - lastRing < 12 + 40 * (1 - density)) return;
+      const grown = count >= lastRingListeners + Math.max(1, Math.ceil(lastRingListeners * 0.02));
+      if (!grown || audioNow - lastRing < 30 + 60 * (1 - density)) return;
       lastRing = audioNow;
+      lastRingListeners = count;
+      rings += 1;
       const chord = chordAt(Date.now() / 1000);
       const target = nearestChordTone(chord, 64 + (Math.random() - 0.5) * 8, 2, 12);
-      strike('vibra_ring', target, audioNow, (0.05 + Math.random() * 0.04) * (0.4 + 0.6 * density), Math.random() * 1.2 - 0.6);
+      strike('vibra_ring', target, audioNow, (0.035 + Math.random() * 0.03) * (0.4 + 0.6 * density), Math.random() * 1.2 - 0.6);
     },
     level() {
       analyser.getFloatTimeDomainData(samples);

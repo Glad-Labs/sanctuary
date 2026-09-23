@@ -45,7 +45,8 @@ export function presenceHoursAt(ms: number): number[] {
 
 export function presenceAt(ms: number): number {
   const base = presenceHoursAt(ms).reduce((a, b) => a + b, 0);
-  const wander = 36 * valueNoise(ms / 4000) + 14 * valueNoise(ms / 1300 + 100);
+  // people come and go in slow waves, not every second
+  const wander = 36 * valueNoise(ms / 25_000) + 14 * valueNoise(ms / 7_000 + 100);
   return base + Math.round(wander);
 }
 
