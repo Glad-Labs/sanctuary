@@ -56,7 +56,10 @@ export interface LiveOptions {
  * the simulated room stands in. `?people=N` overrides either, for trying sizes.
  */
 export function subscribePresence(listener: PresenceListener, every: Every = everyDefault, live?: LiveOptions): () => void {
-  let liveCount: number | null = null;
+  // With a real room to report to, start as a room of one (this device) and
+  // grow as the server answers. Starting from the simulated crowd made the room
+  // swell for a second and then thin out, which sounds like the sound cutting out.
+  let liveCount: number | null = live?.heartbeatUrl || live?.tokenUrl ? 1 : null;
   const now = () => presenceOverride() ?? liveCount ?? presenceAt(Date.now());
   let last = now();
   listener(last);

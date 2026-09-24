@@ -349,9 +349,11 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     return sc.chords[idx === f(w - 1) ? (idx + 1) % n : idx];
   };
 
-  let activeVoices = 3;
-  let density = 0.5;
-  let listeners = 0;
+  // a room of one until presence says otherwise: starting fuller and then
+  // thinning out when the real count arrives sounds like the room cutting out
+  let listeners = 1;
+  let activeVoices = voicesFor(listeners);
+  let density = densityFor(listeners);
   const voiceState: number[] = ROLES.map(() => 0);
   let last = { voicesNow: 0, energy: 0, shimmer: 0, bowlWindow: 0, calm: 0 };
   let running = false;
@@ -567,9 +569,16 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // voices: the floor is always there; every other voice has its own slow
     // tide of presence, and the room and the tide set how many can be above
     // water at once. The cello is favoured a little so the floor is rarely alone.
+    // In a small room the floor is never alone: the cello stays with it. The
+    // floor sits an octave under the chord, 30 to 60 Hz, which a phone speaker
+    // cannot play at all, so a floor on its own is silence on a phone. The
+    // cello's own tide still lifts it above this; the companion fades as the
+    // room fills and the other voices take over.
+    const companion = 0.55 * (1 - density) * (1 - 0.3 * calm);
     slots.forEach((layer, s) => {
       const own = s === 1 ? 0.25 + 0.75 * weave(101, wall, 260) : weave(100 + s, wall, 220 + 50 * s);
-      const presence = s === 0 ? 1 : smoothstep(threshold, threshold + 0.3, own);
+      const tided = smoothstep(threshold, threshold + 0.3, own);
+      const presence = s === 0 ? 1 : s === 1 ? Math.max(tided, companion) : tided;
       advance(layer, wall, now, presence > 0.001);
       const lfo = 0.8 + 0.2 * Math.sin((TAU * wall) / slotLfo[s].period + slotLfo[s].phase);
       const seat = s >= 2 ? here.top : 1; // viola and above soften at your night
