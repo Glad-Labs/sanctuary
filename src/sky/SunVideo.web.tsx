@@ -2,7 +2,6 @@
 // same radial mask as the stills, the red chromosphere crossfading to the
 // gold corona by the sun's height. Web only; the browser streams the files.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { breathAt } from '../breath';
 import { sunMovieUris } from './live';
 
 const RATE = 0.6; // a little slower than NASA's cut, calmer
@@ -25,9 +24,13 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
   // double image. Near the end the films dissolve out to the still beneath
   // (NASA's latest frame, which is where the films end), restart, and
   // dissolve back in: a soft return to two days ago instead of a jump.
-  // The sun also breathes in light: brightness rises with every inhale.
+  // Styles are written only when they change: the films sit in a masked,
+  // screen-blended layer, and rewriting a filter on them every frame (the
+  // breath used to brighten them here) made the page choppy. The breath
+  // brightens the sun through the glow drawn over it instead.
   useEffect(() => {
     let raf = 0;
+    let shown = -1;
     const FADE = 3; // seconds, in film time
     const tick = () => {
       const h = hot.current;
@@ -44,12 +47,12 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
             fade = 0;
           } else if (t > len - FADE) fade = (len - t) / FADE;
           else if (t < FADE) fade = t / FADE;
-          if (frame.current) frame.current.style.opacity = String(Math.max(0, Math.min(1, fade)));
+          const opacity = Math.round(Math.max(0, Math.min(1, fade)) * 100) / 100;
+          if (frame.current && opacity !== shown) {
+            frame.current.style.opacity = String(opacity);
+            shown = opacity;
+          }
         }
-        const { fill } = breathAt(Date.now());
-        const filter = `brightness(${(1.02 + 0.3 * fill).toFixed(3)}) saturate(1.05)`;
-        h.style.filter = filter;
-        g.style.filter = filter;
       }
       raf = requestAnimationFrame(tick);
     };
@@ -89,7 +92,7 @@ export function SunVideo({ size, disc, high, nowMs }: { size: number; disc: numb
       playsInline: true,
       preload: 'auto',
       onError: () => setFailed(true),
-      style: { position: 'absolute', left: inset, top: inset, width: video, height: video, opacity, transition: 'opacity 2s linear' },
+      style: { position: 'absolute', left: inset, top: inset, width: video, height: video, opacity, filter: 'brightness(1.17) saturate(1.05)', transition: 'opacity 2s linear' },
     });
   return React.createElement('div', { ref: frame, style }, layer(uris.hot, 1, hot), layer(uris.gold, high, gold));
 }

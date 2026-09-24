@@ -84,7 +84,7 @@ function hash01(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
-function Dot({ index, clock, lit, energy, size, field, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; field: { w: number; h: number }; colour: string }) {
+function DotView({ index, clock, lit, energy, size, field, colour }: { index: number; clock: SharedValue<number>; lit: SharedValue<number>; energy: SharedValue<number>; size: number; field: { w: number; h: number }; colour: string }) {
   const halfW = field.w / 2;
   const halfH = field.h / 2;
   // home: anywhere between the orb and the edge of the screen. Direction and
@@ -155,6 +155,10 @@ function Dot({ index, clock, lit, energy, size, field, colour }: { index: number
     </Animated.View>
   );
 }
+
+// A point re-renders only when its own props change: the room's five-second
+// updates used to re-render all of them, a visible hitch every five seconds.
+const Dot = React.memo(DotView);
 
 // ---- the bodies -------------------------------------------------------------
 // A whole NASA frame, scaled so its disc matches the orb, shown through a
@@ -418,7 +422,10 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
 
   const dots = useMemo(() => Array.from({ length: DOTS }, (_, i) => i), []);
   const box = Math.max(width, height) * 1.2; // the ground covers the whole page
-  const field = { w: width, h: height };
+  const field = useMemo(() => ({ w: width, h: height }), [width, height]);
+  // Only lit points are mounted. Every mounted point moves every frame, so a
+  // room of three used to animate 240 invisible points; now it animates three.
+  const shownPoints = Math.min(DOTS, pointsFor(people));
   const { palette, daylight } = sky;
   // The aura is a ring just outside the body that breathes outward: the sun's
   // colour by day, moonlight white by night.
@@ -473,7 +480,7 @@ export function Breath({ visible, people, energy }: { visible: boolean; people: 
         </Svg>
       </Animated.View>
 
-      {visible && dots.map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} field={field} colour={aura} />)}
+      {visible && dots.slice(0, shownPoints).map((i) => <Dot key={i} index={i} clock={clock} lit={lit} energy={energyValue} size={size} field={field} colour={aura} />)}
     </View>
   );
 }
