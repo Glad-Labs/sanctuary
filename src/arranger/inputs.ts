@@ -1,5 +1,5 @@
 // What the arranger knows about the room and the sky right now.
-import { presenceAt, presenceHoursAt } from '../presence';
+import { presenceAt, presenceHoursAt } from '../presenceSim';
 import { cityAtDawn, subsolarLongitude } from '../sun';
 
 export interface RoomInputs {

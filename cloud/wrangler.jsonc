@@ -1,0 +1,27 @@
+// Sanctuary on Cloudflare: the web app as static assets, the API in a Worker,
+// the room in one Durable Object. Deploy with scripts/deploy-cloud.sh.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "sanctuary",
+  "main": "index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "../web-dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "triggers": { "crons": ["* * * * *"] },
+  // per IP, per minute: a device beats every 15-30 s and asks for a token only to hear a performer
+  "ratelimits": [
+    { "name": "BEAT_LIMIT", "namespace_id": "4101", "simple": { "limit": 30, "period": 60 } },
+    { "name": "TOKEN_LIMIT", "namespace_id": "4102", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "vars": { "LIVEKIT_URL": "wss://sanctuary-i70y0s2o.livekit.cloud" },
+  // secrets, set by scripts/deploy-cloud.sh from ~/.sanctuary/sanctuary.env:
+  // LIVEKIT_API_KEY, LIVEKIT_API_SECRET, PERFORMER_KEY, PUBLISH_KEY
+  "observability": { "enabled": true }
+}

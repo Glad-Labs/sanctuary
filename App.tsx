@@ -29,10 +29,16 @@ if (Platform.OS !== 'web') {
   }
 }
 const NATIVE_ANIM = Platform.OS !== 'web';
-// Where the shared score comes from. In the browser, default to the arranger on the same host.
+// Where the shared score comes from. In the browser: the dev server on :8090
+// talks to the arranger on the same host; anywhere else the page is served by
+// the cloud Worker, whose API is on the same origin under /api.
 const SCORE_URL =
   process.env.EXPO_PUBLIC_SCORE_URL ??
-  (Platform.OS === 'web' && typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8091/score` : undefined);
+  (Platform.OS === 'web' && typeof location !== 'undefined'
+    ? location.port === '8090'
+      ? `${location.protocol}//${location.hostname}:8091/score`
+      : `${location.origin}/api/score`
+    : undefined);
 // The real room lives on LiveKit; the arranger mints the join token. A phone
 // reports presence with a heartbeat instead, keeping WebRTC out of its audio
 // path until a performer is live (another audio engine in the process makes

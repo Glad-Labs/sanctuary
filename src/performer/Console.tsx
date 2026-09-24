@@ -10,11 +10,23 @@ import type { Drone } from '../audio/drone';
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const noteName = (m: number) => `${NAMES[m % 12]}${Math.floor(m / 12) - 1}`;
 
+let params: { key: string; name: string; tone: boolean } | null | undefined;
+
+/**
+ * The performer's link, read once. The key is then taken out of the address
+ * bar, so it does not sit in browser history, a screenshot, or a shared tab.
+ */
 export function performerParams(): { key: string; name: string; tone: boolean } | null {
-  if (Platform.OS !== 'web' || typeof location === 'undefined') return null;
+  if (params !== undefined) return params;
+  if (Platform.OS !== 'web' || typeof location === 'undefined') return (params = null);
   const q = new URLSearchParams(location.search);
-  if (!q.get('perform')) return null;
-  return { key: q.get('key') ?? '', name: q.get('name') ?? 'a performer', tone: q.get('tone') === '1' };
+  if (!q.get('perform')) return (params = null);
+  params = { key: q.get('key') ?? '', name: q.get('name') ?? 'a performer', tone: q.get('tone') === '1' };
+  if (q.has('key')) {
+    q.delete('key');
+    history.replaceState(history.state, '', `${location.pathname}?${q.toString()}${location.hash}`);
+  }
+  return params;
 }
 
 export function PerformerConsole({ drone, arranger, room, people, params }: { drone: Drone | null; arranger: string; room: string; people: number; params: { key: string; name: string; tone: boolean } }) {

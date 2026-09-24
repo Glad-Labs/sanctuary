@@ -17,6 +17,7 @@ import { createServer } from 'node:http';
 import { compose } from '../src/arranger/compose';
 import { roomInputs, type RoomInputs } from '../src/arranger/inputs';
 import { sanitize, ScoreShape, type Score, type CleanScore } from '../src/arranger/score';
+import { liveScore } from '../src/arranger/live';
 
 const PORT = Number(process.env.ARRANGER_PORT ?? 8091);
 const INTERVAL_S = Number(process.env.ARRANGER_INTERVAL_MIN ?? 10) * 60;
@@ -34,6 +35,15 @@ const LIVEKIT_SECRET = process.env.LIVEKIT_API_SECRET ?? 'sanctuary-dev-secret-c
 const livekit = process.env.LIVEKIT_DISABLED ? null : new RoomServiceClient(LIVEKIT_URL.replace(/^ws/, 'http'), LIVEKIT_KEY, LIVEKIT_SECRET);
 // A performer joins with this key and may publish audio. Development value; change it.
 const PERFORMER_KEY = process.env.PERFORMER_KEY ?? 'sanctuary-stage-dev';
+// The cloud (cloud/index.ts): when set, presence comes from there and every
+// score is pushed there with the publish key. Nothing on this machine needs to
+// be reachable from outside; the PC only makes outbound requests.
+const CLOUD_URL = (process.env.CLOUD_URL ?? '').replace(/\/$/, '');
+const PUBLISH_KEY = process.env.PUBLISH_KEY ?? '';
+if (CLOUD_URL && !PUBLISH_KEY) {
+  console.error(`refusing to publish to ${CLOUD_URL} without PUBLISH_KEY (see scripts/arranger.sh)`);
+  process.exit(1);
+}
 // Development keys are fine on a private network and never anywhere else.
 if (/^wss:|^https:/.test(LIVEKIT_URL) && !process.env.LIVEKIT_DISABLED) {
   const missing = ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'PERFORMER_KEY'].filter((k) => !process.env[k]);
@@ -53,6 +63,17 @@ type PresenceReport = { count: number; hours: number[]; performer: { name: strin
 
 /** The real room: how many are here, what hour it is for each of them, and whether someone is on stage. */
 async function livePresence(room: string): Promise<PresenceReport> {
+  if (CLOUD_URL) {
+    try {
+      const res = await fetch(`${CLOUD_URL}/api/presence`, { signal: AbortSignal.timeout(10_000) });
+      if (res.ok) return (await res.json()) as PresenceReport;
+      console.warn(`cloud presence failed: ${res.status}`);
+    } catch (e) {
+      console.warn('cloud presence failed:', e instanceof Error ? e.message : e);
+    }
+    // the cloud is unreachable: keep the last stage state rather than guess
+    return { count: 0, hours: new Array<number>(24).fill(0), performer: lastPerformer ? { name: lastPerformer } : null };
+  }
   const hours = new Array<number>(24).fill(0);
   const nowUtcHour = (Date.now() / 3_600_000) % 24;
   const add = (tz: number) => { hours[Math.floor((((nowUtcHour + tz / 60) % 24) + 24) % 24)] += 1; };
@@ -90,23 +111,9 @@ async function joinToken(room: string, tz: number, performer?: { name: string })
   return at.toJwt();
 }
 
-/** With someone on stage the bed steps back: harmony held, few voices, no melody, room for a human. */
-function liveScore(body: CleanScore, name: string): CleanScore {
-  return {
-    ...body,
-    title: `With ${name}`,
-    reasoning: `${name} is on stage; the bed holds still beneath them.`,
-    chordSeconds: Math.max(body.chordSeconds, 150),
-    density: Math.min(body.density, 0.3),
-    sea: Math.min(body.sea, 0.5),
-    shimmer: Math.min(body.shimmer, 0.15),
-    bowls: Math.min(body.bowls, 0.1),
-    melody: undefined,
-  };
-}
 // Backends: 'anthropic' (Claude), 'ollama' (a local model on this machine), 'none' (composer only).
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen3.6:27b';
+const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11435';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen3-vl:30b-a3b-instruct';
 const BACKEND = (process.env.ARRANGER_BACKEND ?? (hasCredential ? 'anthropic' : 'ollama')) as 'anthropic' | 'ollama' | 'none';
 const client = BACKEND === 'anthropic' && hasCredential ? new Anthropic() : null;
 const MODEL_NAME = BACKEND === 'anthropic' ? MODEL : BACKEND === 'ollama' ? OLLAMA_MODEL : null;
@@ -196,6 +203,20 @@ let lastPerformer: string | null = null;
 // change (a slow model call, say) is stale when it lands and is dropped.
 let stageEpoch = 0;
 
+async function publishToCloud(score: Score) {
+  try {
+    const res = await fetch(`${CLOUD_URL}/api/publish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${PUBLISH_KEY}` },
+      body: JSON.stringify(score),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) console.warn(`publish failed: ${res.status} ${await res.text()}`);
+  } catch (e) {
+    console.warn('publish failed:', e instanceof Error ? e.message : e);
+  }
+}
+
 async function arrange(lead = LEAD_S) {
   const epoch = stageEpoch;
   const live = await livePresence(ROOM);
@@ -217,6 +238,7 @@ async function arrange(lead = LEAD_S) {
   if (history.length > 200) history.shift();
   try { appendFileSync(LOG, JSON.stringify(entry) + '\n'); } catch {}
   current = score;
+  if (CLOUD_URL) await publishToCloud(score);
   console.log(`[${new Date().toISOString()}] "${score.title}" (${source}${error ? `, ${error}` : ''}) applies ${new Date(validFrom * 1000).toISOString()}${score.melody ? `  melody "${score.melody.notes}"` : ''}`);
 }
 
@@ -263,7 +285,7 @@ createServer(async (req, res) => {
     res.end('{}');
   }
 }).listen(PORT, () => {
-  console.log(`arranger on :${PORT}  backend ${BACKEND}  model ${MODEL_NAME ?? 'none (composer only)'}  every ${INTERVAL_S / 60} min`);
+  console.log(`arranger on :${PORT}  backend ${BACKEND}  model ${MODEL_NAME ?? 'none (composer only)'}  every ${INTERVAL_S / 60} min${CLOUD_URL ? `  publishing to ${CLOUD_URL}` : ''}`);
 });
 
 arrange();

@@ -77,11 +77,17 @@ code, only notes and rests; `sanitizeMelody()` rejects anything else, turns
 any note outside the score's voicings into a rest, and checks the pattern
 reads (`src/audio/pattern.ts`).
 
-Run the arranger on the same machine as the dev server. With a local model
-through Ollama (the default when no Anthropic key is set):
+Run the arranger with `scripts/arranger.sh`, which loads
+`~/.sanctuary/sanctuary.env`. With a local model through Ollama (the default
+when no Anthropic key is set), it uses the Ollama instance pinned to the RTX
+3090 on port 11435 and the model already resident there,
+`qwen3-vl:30b-a3b-instruct`, so an arrangement loads and evicts nothing on
+either card. The primary Ollama on 11434 is pinned to the 5090 and holds one
+model at a time for the rest of the pipeline; pointing the arranger there
+swaps a 20 GB model in every ten minutes.
 
 ```bash
-ARRANGER_BACKEND=ollama OLLAMA_MODEL=qwen3.6:27b npx tsx server/index.ts
+scripts/arranger.sh
 ```
 
 Or with Claude:
@@ -170,16 +176,45 @@ Host networking matters: behind Docker's port mapping, WebRTC's media
 connection completes only for clients on this machine, and a phone on the
 Tailscale network is dropped a few seconds after joining.
 
-The arranger mints join tokens (`GET /token?room=rest&tz=<minutes east of
-UTC>`) and reports the room (`GET /presence`). `LIVEKIT_URL`,
-`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` configure it; the defaults match
-`server/livekit.yaml`, which holds development keys for a private network
-and must change before anyone else uses this. The arranger and LiveKit are plain HTTP and WebSocket on the private
-network, so the Android build allows cleartext traffic (`expo-build-
-properties` in `app.json`); a public deployment puts both behind TLS and
-drops that. Without a token endpoint, or
-when the room is unreachable, the app falls back to the simulated presence
-in `src/presence.ts`, and `?people=N` overrides either.
+Without a token endpoint, or when the room is unreachable, the app falls
+back to the simulated presence in `src/presenceSim.ts`, and `?people=N`
+overrides either.
+
+## The cloud
+
+Everything a listener touches is on Cloudflare, at
+https://sanctuary.mattg-01d.workers.dev, over HTTPS only. One Worker
+(`cloud/index.ts`) serves the web app as static assets and a small API, and
+one Durable Object holds the room: heartbeats, the current score, and who
+is on stage (read from LiveKit Cloud).
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/score` | the current shared score |
+| `GET /api/heartbeat?room&id&tz` | "I am here"; returns the room |
+| `GET /api/presence` | count, local-hour histogram, performer |
+| `GET /api/token?room&tz` | a LiveKit join token; with `role=performer&key&name`, one that may publish |
+| `POST /api/publish` | a new score, from the PC, with `Bearer PUBLISH_KEY` |
+
+The PC stays the composer and only makes outbound requests: with `CLOUD_URL`
+and `PUBLISH_KEY` set, the arranger reads presence from `/api/presence`
+(including the 15-second stage watch) and pushes every score to
+`/api/publish`. Nothing on the home network is exposed, and Tailscale is not
+involved. If the PC is quiet for fifteen minutes, a cron trigger in the
+Worker composes scores itself (composer only, and live scores when someone
+is on stage), so the room never stalls.
+
+Heartbeats and LiveKit tokens are rate limited per IP. The score history is
+not exposed. Deploy, including secrets from `~/.sanctuary/sanctuary.env`
+piped straight to Cloudflare:
+
+```bash
+scripts/deploy-cloud.sh
+```
+
+On the free Workers plan every heartbeat is a request, and there are
+100,000 a day. A device beats every 15 seconds, so that covers about 17
+devices listening around the clock. The $5 plan covers far more.
 
 ## On the phone
 
@@ -242,10 +277,10 @@ It writes `dist/sanctuary-<version>.apk`, signed with the Glad Labs key.
 The key lives outside the repo: `~/.sanctuary/release.keystore` and
 `~/.sanctuary/keystore.env` (the passwords), created once with `keytool`
 and never committed. The same key must sign every future build or Android
-refuses the update, so back those two files up. The arranger address is
-baked in from `EXPO_PUBLIC_SCORE_URL` at build time, so a recipient must be
-on the Tailscale network for presence and the arranger; the room itself
-plays without them.
+refuses the update, so back those two files up. The API address is
+baked in from `EXPO_PUBLIC_SCORE_URL` at build time and defaults to the
+cloud, so a recipient needs nothing but the APK. The build allows HTTPS
+only.
 
 iOS needs a Mac or an EAS cloud build:
 
