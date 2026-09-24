@@ -16,6 +16,7 @@ import type {
   AudioContext,
   AudioParam,
   BiquadFilterNode,
+  DelayNode,
   GainNode,
 } from 'react-native-audio-api';
 import { breathAt } from '../breath';
@@ -228,24 +229,59 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     return unit(seed, layer * 7919 + i) * (1 - t) + unit(seed, layer * 7919 + i + 1) * t;
   };
 
-  // master ── analyser
-  const master = ctx.createGain();
-  master.gain.value = 0;
+  const NATIVE = options.native === true;
+
+  // Nodes. On a phone every gain, filter and delay mixes its inputs into its
+  // own buffer (the "explicit" channel mode). By default react-native-audio-api
+  // 0.13 processes a node in place in its input's buffer, and when a node
+  // feeds more than one consumer the later ones are handed the node's own
+  // buffer, which it had zeroed: the first consumer to run got the sound and
+  // the rest got silence, in an order (an unordered set of inputs) that
+  // changes from launch to launch. Every voice feeds both the dry mix and the
+  // hall, so on the phone the room played, went silent, or cut in and out,
+  // depending on the launch. The browser implements the spec; it keeps the
+  // plain factory methods. The constructors come from a throwaway node so
+  // this file imports no runtime from the audio library (renders run in Node).
+  const OWN = { channelCount: 2, channelCountMode: 'explicit' } as const;
+  type Make<T> = new (context: unknown, options: Record<string, unknown>) => T;
+  const ctorOf = <T,>(node: T): Make<T> => (node as unknown as { constructor: Make<T> }).constructor;
+  const Gain = NATIVE ? ctorOf(ctx.createGain()) : null;
+  const Filter = NATIVE ? ctorOf(ctx.createBiquadFilter()) : null;
+  const Delay = NATIVE ? ctorOf(ctx.createDelay(1)) : null;
+  const Analyser = NATIVE ? ctorOf(ctx.createAnalyser()) : null;
+  const gainNode = (value: number): GainNode => {
+    if (Gain) return new Gain(ctx, { ...OWN, gain: value });
+    const g = ctx.createGain();
+    g.gain.value = value;
+    return g;
+  };
+  const filterNode = (type: BiquadFilterNode['type'], frequency: number, Q?: number): BiquadFilterNode => {
+    if (Filter) return new Filter(ctx, { ...OWN, type, frequency, ...(Q !== undefined ? { Q } : {}) });
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = frequency;
+    if (Q !== undefined) f.Q.value = Q;
+    return f;
+  };
+  const delayNode = (seconds: number): DelayNode => {
+    if (Delay) return new Delay(ctx, { ...OWN, maxDelayTime: Math.max(1, seconds), delayTime: seconds });
+    const d = ctx.createDelay(Math.max(1, seconds));
+    d.delayTime.value = seconds;
+    return d;
+  };
+
+  // master ── makeup ── meter ── speaker
+  const master = gainNode(0);
   // Loudness. The mix is gentle by design, which left it nearly inaudible on
   // a phone speaker, so makeup gain lifts it about eight decibels. No limiter:
   // the mix peaks well under half scale before makeup, so there is headroom,
   // and a waveshaper on the phone gated the sound to bursts.
-  const makeup = ctx.createGain();
-  makeup.gain.value = MAKEUP;
+  const makeup = gainNode(MAKEUP);
   master.connect(makeup);
-  makeup.connect(ctx.destination);
-  const tideGain = ctx.createGain();
-  tideGain.gain.value = 0.55;
+  const tideGain = gainNode(0.55);
   tideGain.connect(master);
-  const breathGain = ctx.createGain();
-  breathGain.gain.value = 1;
+  const breathGain = gainNode(1);
   breathGain.connect(tideGain);
-  const NATIVE = options.native === true;
 
   // Smoothly steer a parameter toward a target. Plain setTargetAtTime: an
   // earlier version cancelled previous events first and skipped unchanged
@@ -253,22 +289,22 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   const aim = (param: AudioParam, target: number, now: number, tau: number) => {
     param.setTargetAtTime(target, now, tau);
   };
-  // The level meter. Read once per status line on a phone (it is only a copy
-  // of the last 1024 samples), so the log shows what actually reaches the
-  // speaker, not just what the engine intends.
-  const analyser: AnalyserNode | null = ctx.createAnalyser();
+  // The level meter, in series just before the speaker (an analyser passes
+  // its input through), so it measures exactly what is sent out. It has to be
+  // in the path: react-native-audio-api only runs nodes the speaker pulls on,
+  // so an analyser hanging off to the side never sees a sample. Read once per
+  // status line (a copy of the last 1024 samples).
+  const analyser: AnalyserNode = Analyser ? new Analyser(ctx, { ...OWN, fftSize: 1024 }) : ctx.createAnalyser();
+  analyser.fftSize = 1024;
   const samples = new Float32Array(1024);
-  if (analyser) {
-    analyser.fftSize = 1024;
-    master.connect(analyser);
-  }
+  makeup.connect(analyser);
+  analyser.connect(ctx.destination);
   const meter = (): string => {
-    if (!analyser) return 'out=?';
     analyser.getFloatTimeDomainData(samples);
     let sum = 0;
     let peak = 0;
     for (let i = 0; i < samples.length; i++) {
-      const v = samples[i] * MAKEUP;
+      const v = samples[i];
       if (!Number.isFinite(v)) return 'out=INVALID';
       sum += v * v;
       peak = Math.max(peak, Math.abs(v));
@@ -278,26 +314,20 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   };
 
   // dry and wet buses
-  const dry = ctx.createGain();
-  dry.gain.value = 0.8;
+  const dry = gainNode(0.8);
   dry.connect(breathGain);
-  const wet = ctx.createGain();
-  wet.gain.value = 0.3;
+  const wet = gainNode(0.3);
   wet.connect(breathGain);
   // The hall. In a browser or offline it is a convolution with a six-second
-  // synthesized impulse. On a phone that convolution starves the audio thread
-  // (the sound chops), so native gets a light algorithmic hall instead: four
-  // feedback delay lines through a darkening filter, cross-coupled in a ring.
-  //
-  // Stability: every pass round a line is multiplied by at most
-  // |self| + |cross| (0.70 + 0.14 = 0.84), times the damping filter's small
-  // resonant peak (about 1 dB), so the loop gain stays under 1 in every mode
-  // and for any delay lengths. The first version used 0.86 and -0.18: 1.04
-  // for lines swinging against each other, so the hall grew by itself into a
-  // 2 kHz howl within seconds and then overflowed, and on the phone the sound
-  // cut out a few seconds after it started. Rendered with NATIVE=1, it now
-  // settles at the same level as the browser's hall.
-  const reverbIn: GainNode = ctx.createGain();
+  // synthesized impulse. On a phone the library's convolver hands every 2.7 ms
+  // block to a thread pool and waits for it, which starves the audio thread
+  // (the sound chops), so native gets a hall of its own: the mix, darkened,
+  // repeated as a spray of echoes that thin and darken as they go, out to
+  // about two seconds. No feedback: in react-native-audio-api a delay inside
+  // a loop reads a buffer that is still being built, so a feedback hall there
+  // either does nothing or runs away (the first version howled up and cut
+  // the sound out a few seconds after it started).
+  const reverbIn: GainNode = gainNode(1);
   if (!NATIVE) {
     const conv = ctx.createConvolver();
     conv.buffer = impulseResponse(ctx, 6, seed + 11);
@@ -305,31 +335,21 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     reverbIn.connect(conv);
     conv.connect(wet);
   } else {
-    const lines = [0.0297, 0.0371, 0.0411, 0.0437].map((base, i) => {
-      const delay = ctx.createDelay(1);
-      delay.delayTime.value = base * 3.1 + unit(seed, 900 + i) * 0.01; // 90 to 140 ms
-      const damp = ctx.createBiquadFilter();
-      damp.type = 'lowpass';
-      damp.frequency.value = 2600;
-      const fb = ctx.createGain();
-      fb.gain.value = 0.7; // |self| + |cross| < 1: see Stability above
-      delay.connect(damp);
-      damp.connect(fb);
-      fb.connect(delay);
-      reverbIn.connect(delay);
-      return { delay, damp };
-    });
-    // cross-couple so the tail turns diffuse rather than metallic
-    lines.forEach((l, i) => {
-      const x = ctx.createGain();
-      x.gain.value = -0.14;
-      l.damp.connect(x);
-      x.connect(lines[(i + 1) % lines.length].delay);
-    });
-    const sum = ctx.createGain();
-    sum.gain.value = 0.28;
-    lines.forEach((l) => l.damp.connect(sum));
+    const sum = gainNode(0.55);
     sum.connect(wet);
+    const TAPS = 12;
+    for (let i = 0; i < TAPS; i++) {
+      const x = i / (TAPS - 1);
+      // echo times spread out and jittered so they blur rather than ring
+      const time = 0.045 + 1.9 * x ** 1.6 + unit(seed, 900 + i) * 0.03;
+      const tap = delayNode(time);
+      const damp = filterNode('lowpass', 3200 - 2100 * x);
+      const level = gainNode(0.34 * Math.exp(-2.6 * x));
+      reverbIn.connect(tap);
+      tap.connect(damp);
+      damp.connect(level);
+      level.connect(sum);
+    }
   }
   const toBoth = (node: { connect: (n: GainNode) => unknown }) => {
     node.connect(dry);
@@ -337,26 +357,18 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   };
 
   // the pad: a warmth filter on the whole string body
-  const padFilter: BiquadFilterNode = ctx.createBiquadFilter();
-  padFilter.type = 'lowpass';
-  padFilter.frequency.value = 2400;
-  padFilter.Q.value = 0.5;
+  const padFilter: BiquadFilterNode = filterNode('lowpass', 2400, 0.5);
   toBoth(padFilter);
 
   // the melody: a sparse line above the strings, played by the flute or a
   // violin, in its own soft light and the same hall
-  const melodyFilter = ctx.createBiquadFilter();
-  melodyFilter.type = 'lowpass';
-  melodyFilter.frequency.value = 2600;
-  const melodyBus = ctx.createGain();
-  melodyBus.gain.value = 0;
+  const melodyFilter = filterNode('lowpass', 2600);
+  const melodyBus = gainNode(0);
   melodyBus.connect(melodyFilter);
   toBoth(melodyFilter);
 
   // bed: the sea, softened
-  const bedFilter = ctx.createBiquadFilter();
-  bedFilter.type = 'lowpass';
-  bedFilter.frequency.value = 3000;
+  const bedFilter = filterNode('lowpass', 3000);
   toBoth(bedFilter);
 
   let current: CleanScore = DEFAULT_SCORE;
@@ -384,8 +396,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   let ticker: ReturnType<typeof setInterval> | undefined;
 
   function makeLayer(id: string, rate: number, period: number, fade: number, phase: number, dest: GainNode | BiquadFilterNode, pan: number, loop = true): Layer {
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
+    const gain = gainNode(0);
     if (NATIVE) {
       gain.connect(dest); // no per-voice panning on a phone: the hall gives the width
     } else {
@@ -442,7 +453,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     src.buffer = buffer;
     src.loop = layer.loop;
     src.playbackRate.value = rate;
-    const env = ctx.createGain();
+    const env = gainNode(0);
     env.gain.setValueAtTime(envAt(offset), at);
     if (offset < fade / 2) env.gain.linearRampToValueAtTime(curve(0.5), t0 + fade / 2);
     if (offset < fade) env.gain.linearRampToValueAtTime(1, t0 + fade);
@@ -475,13 +486,16 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.playbackRate.value = targetMidi !== undefined && def.midi !== undefined ? rateFor(def.midi, targetMidi) : 1;
-    const g = ctx.createGain();
-    g.gain.value = level;
-    const panner = ctx.createStereoPanner();
-    panner.pan.value = pan;
+    const g = gainNode(level);
     src.connect(g);
-    g.connect(panner);
-    toBoth(panner);
+    if (NATIVE) {
+      toBoth(g); // no panning on a phone
+    } else {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = pan;
+      g.connect(panner);
+      toBoth(panner);
+    }
     src.start(at);
   }
 
@@ -496,16 +510,20 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     const attack = Math.max(0.3, m.attack);
     const release = Math.max(1, m.release);
     const hold = Math.max(0.2, seconds - attack * 0.5);
-    const env = ctx.createGain();
+    const env = gainNode(0);
     env.gain.setValueAtTime(0, at);
     env.gain.linearRampToValueAtTime(m.gain * 0.9, at + attack);
     env.gain.setValueAtTime(m.gain * 0.9, at + attack + hold);
     env.gain.setTargetAtTime(0, at + attack + hold, release / 3);
-    const panner = ctx.createStereoPanner();
-    panner.pan.value = 0.5 * Math.sin(midi * 1.7);
     src.connect(env);
-    env.connect(panner);
-    panner.connect(melodyBus);
+    if (NATIVE) {
+      env.connect(melodyBus);
+    } else {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = 0.5 * Math.sin(midi * 1.7);
+      env.connect(panner);
+      panner.connect(melodyBus);
+    }
     src.start(at);
     src.stop(at + attack + hold + release * 1.5);
     melodyNotes += 1;
