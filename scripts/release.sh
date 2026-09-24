@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 source scripts/android-env.sh
 set -a; source ~/.sanctuary/keystore.env; set +a
 export SANCTUARY_KEYSTORE="$HOME/.sanctuary/release.keystore"
-export EXPO_PUBLIC_SCORE_URL="${EXPO_PUBLIC_SCORE_URL:-http://100.111.15.72:8091/score}"
+export EXPO_PUBLIC_SCORE_URL="${EXPO_PUBLIC_SCORE_URL:-https://sanctuary.mattg-01d.workers.dev/api/score}"
 export CI=1
 npx expo prebuild --platform android --no-install >/dev/null
 (cd android && ./gradlew assembleRelease -q 2>&1 | grep -vE "^Deprecated|warning|^$" || true)
