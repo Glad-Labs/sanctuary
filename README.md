@@ -225,7 +225,7 @@ devices listening around the clock. The $5 plan covers far more.
 
 ## On the phone
 
-Three things learned the hard way on a Pixel 9, all handled in the code:
+Things learned the hard way on a Pixel 9, all handled in the code:
 
 - **React Native stops delivering JavaScript timers while the activity is
   paused, and a locked screen pauses it.** The engine's scheduler used to
@@ -246,6 +246,21 @@ Three things learned the hard way on a Pixel 9, all handled in the code:
 - **Judge audio only on a release build.** A debug build compiles the audio
   library's DSP unoptimized; its render thread pins a core and the sound
   chops. `npx expo run:android --variant release`.
+- **react-native-audio-api 0.13 does not implement the Web Audio graph
+  faithfully, so every node on the phone is created in "explicit" channel
+  mode.** By default a node processes in place in its input's buffer, and a
+  node that feeds more than one consumer hands the later ones its own,
+  zeroed buffer: the first consumer to run gets the sound, the rest get
+  silence, in an order that changes from launch to launch. Every voice
+  feeds both the dry mix and the hall, so the room played, went silent or
+  cut in and out depending on the launch. A delay inside a feedback loop
+  reads a buffer that is still being built, so the phone's hall is
+  feed-forward (the first, a feedback hall, also ran away and cut the sound
+  out). The library only runs nodes the speaker pulls on, so the level
+  meter sits in series before the speaker. The browser and the offline
+  renderer implement the spec, which is why none of this shows up there:
+  render the phone's path with `NATIVE=1`, and on the phone read what
+  actually leaves the app from `out=` in the `diag ctx` lines.
 
 The samples are always handed to the decoder as bytes: on the phone its
 file-path route produced silent buffers from the app's bundled assets.
