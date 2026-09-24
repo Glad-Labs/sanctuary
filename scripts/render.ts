@@ -26,7 +26,7 @@ async function main() {
   // Any audio-context-shaped object works; the drone only uses the standard API.
   // Optional: hear the room from a listener's hour. LOCAL_HOUR=2 for 2am.
   const localHour = process.env.LOCAL_HOUR !== undefined ? Number(process.env.LOCAL_HOUR) : undefined;
-  const drone = createDrone(ctx as never, 'rest', { autoTick: false, buffers, localHour: localHour !== undefined ? () => localHour : undefined });
+  const drone = createDrone(ctx as never, 'rest', { autoTick: false, buffers, native: process.env.NATIVE === '1', localHour: localHour !== undefined ? () => localHour : undefined });
 
   // Start on the rising tide, a few minutes in, so the room builds over the render.
   const TIDE_S = scoreBody.tide.minutes * 60;

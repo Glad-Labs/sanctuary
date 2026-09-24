@@ -109,6 +109,13 @@ Render any score to listen to it:
 npx tsx scripts/render.ts 72 out.wav path/to/score.json
 ```
 
+`NATIVE=1` renders the phone's audio path instead of the browser's: the
+algorithmic hall in place of the convolution. Render with it after touching
+the hall. Its feedback must stay under 1 in every mode (see the comment in
+`src/audio/drone.ts`); the first version did not, and on the phone the sound
+howled up and then cut out a few seconds after it started, which the
+browser renders never showed.
+
 ## The stage
 
 A performer is one more layer in the weave, arriving over the network. Open

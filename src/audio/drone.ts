@@ -245,8 +245,6 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   const breathGain = ctx.createGain();
   breathGain.gain.value = 1;
   breathGain.connect(tideGain);
-  // the level meter is for the web build and tests; on a phone every node
-  // costs audio-thread time, so native does without it
   const NATIVE = options.native === true;
 
   // Smoothly steer a parameter toward a target. Plain setTargetAtTime: an
@@ -255,12 +253,29 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   const aim = (param: AudioParam, target: number, now: number, tau: number) => {
     param.setTargetAtTime(target, now, tau);
   };
-  const analyser: AnalyserNode | null = NATIVE ? null : ctx.createAnalyser();
+  // The level meter. Read once per status line on a phone (it is only a copy
+  // of the last 1024 samples), so the log shows what actually reaches the
+  // speaker, not just what the engine intends.
+  const analyser: AnalyserNode | null = ctx.createAnalyser();
   const samples = new Float32Array(1024);
   if (analyser) {
     analyser.fftSize = 1024;
     master.connect(analyser);
   }
+  const meter = (): string => {
+    if (!analyser) return 'out=?';
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const v = samples[i] * MAKEUP;
+      if (!Number.isFinite(v)) return 'out=INVALID';
+      sum += v * v;
+      peak = Math.max(peak, Math.abs(v));
+    }
+    const rms = Math.sqrt(sum / samples.length);
+    return `out=${rms > 0 ? (20 * Math.log10(rms)).toFixed(1) : '-inf'}dB peak=${peak.toFixed(2)}`;
+  };
 
   // dry and wet buses
   const dry = ctx.createGain();
@@ -272,7 +287,16 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
   // The hall. In a browser or offline it is a convolution with a six-second
   // synthesized impulse. On a phone that convolution starves the audio thread
   // (the sound chops), so native gets a light algorithmic hall instead: four
-  // feedback delay lines through a darkening filter, cross-coupled.
+  // feedback delay lines through a darkening filter, cross-coupled in a ring.
+  //
+  // Stability: every pass round a line is multiplied by at most
+  // |self| + |cross| (0.70 + 0.14 = 0.84), times the damping filter's small
+  // resonant peak (about 1 dB), so the loop gain stays under 1 in every mode
+  // and for any delay lengths. The first version used 0.86 and -0.18: 1.04
+  // for lines swinging against each other, so the hall grew by itself into a
+  // 2 kHz howl within seconds and then overflowed, and on the phone the sound
+  // cut out a few seconds after it started. Rendered with NATIVE=1, it now
+  // settles at the same level as the browser's hall.
   const reverbIn: GainNode = ctx.createGain();
   if (!NATIVE) {
     const conv = ctx.createConvolver();
@@ -288,7 +312,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       damp.type = 'lowpass';
       damp.frequency.value = 2600;
       const fb = ctx.createGain();
-      fb.gain.value = 0.86; // a long tail, still stable with the damping
+      fb.gain.value = 0.7; // |self| + |cross| < 1: see Stability above
       delay.connect(damp);
       damp.connect(fb);
       fb.connect(delay);
@@ -298,7 +322,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
     // cross-couple so the tail turns diffuse rather than metallic
     lines.forEach((l, i) => {
       const x = ctx.createGain();
-      x.gain.value = -0.18;
+      x.gain.value = -0.14;
       l.damp.connect(x);
       x.connect(lines[(i + 1) % lines.length].delay);
     });
@@ -546,7 +570,7 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       lastDiag = wall;
       if (!diagStart) diagStart = { wall, ctx: now };
       const drift = (now - diagStart.ctx) - (wall - diagStart.wall);
-      console.warn(`diag ctx=${now.toFixed(2)} drift=${drift.toFixed(3)}s state=${ctx.state} started=${instancesStarted} resets=${clockResets} voices=${last.voicesNow.toFixed(2)} energy=${last.energy.toFixed(2)} calm=${last.calm.toFixed(2)} master=${master.gain.value.toFixed(2)} tide=${tideGain.gain.value.toFixed(2)}`);
+      console.warn(`diag ctx=${now.toFixed(2)} drift=${drift.toFixed(3)}s state=${ctx.state} started=${instancesStarted} resets=${clockResets} voices=${last.voicesNow.toFixed(2)} energy=${last.energy.toFixed(2)} calm=${last.calm.toFixed(2)} master=${master.gain.value.toFixed(2)} tide=${tideGain.gain.value.toFixed(2)} ${meter()}`);
     }
     if (pending && wall >= pending.validFrom) {
       current = pending;
