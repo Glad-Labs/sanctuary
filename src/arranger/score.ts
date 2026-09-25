@@ -78,18 +78,40 @@ export const DEFAULT_SCORE: CleanScore = {
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(x) ? x : lo));
 
 /** Make one voicing playable: six ascending notes in range, no clusters. Null if it cannot be. */
+/**
+ * Whether `n` can join a chord already holding `kept` (sorted) without
+ * turning it from rest into tension:
+ * - not within two semitones of the note below or above it (a cluster);
+ * - not a tritone from the note below or above it (the interval that most
+ *   wants to resolve; spread further apart it stays soft);
+ * - not a minor ninth (a half step an octave apart) from any note: the clash
+ *   survives the octave and grates.
+ */
+function fits(kept: readonly number[], n: number): boolean {
+  let below: number | undefined;
+  let above: number | undefined;
+  for (const x of kept) {
+    if (x <= n) below = x;
+    else if (above === undefined) above = x;
+    if (Math.abs(n - x) === 13) return false;
+  }
+  if (below !== undefined && (n - below < 3 || n - below === 6)) return false;
+  if (above !== undefined && (above - n < 3 || above - n === 6)) return false;
+  return true;
+}
+
 export function sanitizeChord(notes: unknown): number[] | null {
   if (!Array.isArray(notes)) return null;
   const clean = [...new Set(notes.map((n) => Math.round(Number(n))).filter((n) => Number.isFinite(n)))]
     .filter((n) => n >= 33 && n <= 84)
     .sort((a, b) => a - b);
-  // drop any note within two semitones of the one below it (a cluster, not a chord)
+  // keep notes from the bottom up, dropping any that would cluster or clash
   const spaced: number[] = [];
-  for (const n of clean) if (spaced.length === 0 || n - spaced[spaced.length - 1] >= 3) spaced.push(n);
+  for (const n of clean) if (fits(spaced, n)) spaced.push(n);
   if (spaced.length < 4) return null;
-  // fill to six by doubling notes an octave up, keeping the spacing rule
+  // fill to six by doubling notes an octave up, under the same rules
   while (spaced.length < 6) {
-    const candidate = spaced.map((n) => n + 12).find((c) => c <= 84 && spaced.every((x) => Math.abs(x - c) >= 3));
+    const candidate = spaced.map((n) => n + 12).find((c) => c <= 84 && !spaced.includes(c) && fits(spaced, c));
     if (candidate === undefined) return null;
     spaced.push(candidate);
     spaced.sort((a, b) => a - b);

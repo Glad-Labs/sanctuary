@@ -36,6 +36,7 @@ const TAU = Math.PI * 2;
 // indices a voice may choose between (an octave up where marked), so the
 // upper voices wander while staying inside the chord.
 interface Role { kinds: ReadonlyArray<SampleKind>; tones: ReadonlyArray<[number, number]>; level: number }
+const FLOOR_LOW = 33; // A1, 55 Hz: the lowest the floor goes
 const ROLES: ReadonlyArray<Role> = [
   { kinds: ['bass'], tones: [[0, -12]], level: 0.75 },
   { kinds: ['cello'], tones: [[0, 0]], level: 0.8 },
@@ -418,7 +419,10 @@ export function createDrone(ctx: AudioContext, room = 'rest', options: DroneOpti
       let c = choice(k);
       if (role.tones.length > 1 && c === choice(k - 1)) c = (c + 1) % role.tones.length;
       const [index, octave] = role.tones[c];
-      const target = chord[index] + octave;
+      let target = chord[index] + octave;
+      // the floor sits an octave under the chord but never below A1 (55 Hz):
+      // under that most speakers play nothing and headphones give only pressure
+      if (s === 0) while (target < FLOOR_LOW) target += 12;
       const def = pick(role.kinds, target);
       return def && def.midi !== undefined ? { id: def.id, rate: rateFor(def.midi, target) } : undefined;
     };
