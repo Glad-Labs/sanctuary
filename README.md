@@ -61,7 +61,11 @@ Three writers, in order of preference:
    listeners, and what time it is for the people in the room as shares of
    night, morning, day and evening), takes the composer's draft, refines it,
    and the result is checked by `sanitize()` before anything reaches a
-   speaker.
+   speaker. Each voicing keeps to MIDI 33-84 and drops any note that would
+   cluster (within two semitones of a neighbour), form a tritone with a
+   neighbour, or form a minor ninth with any note: those intervals read as
+   tension, not rest. The engine's floor plays an octave under the voicing
+   but never below A1 (55 Hz).
 2. **The composer**, `src/arranger/compose.ts`, a deterministic arranger with
    no model. It is the draft Claude starts from and the server's answer when
    no key is set.
